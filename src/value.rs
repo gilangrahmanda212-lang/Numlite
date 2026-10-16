@@ -10,47 +10,31 @@ pub enum Value {
 pub struct Matrix {
     pub rows: usize,
     pub cols: usize,
-    pub data: Vec<f64>,   // row-major order
+    pub data: Vec<f64>,
 }
 
 impl Matrix {
     pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> Self {
-        assert_eq!(data.len(), rows * cols, "Panjang data tidak sesuai dimensi");
+        assert_eq!(data.len(), rows * cols);
         Matrix { rows, cols, data }
     }
-
     pub fn zeros(rows: usize, cols: usize) -> Self {
-        Matrix {
-            rows,
-            cols,
-            data: vec![0.0; rows * cols],
-        }
+        Matrix { rows, cols, data: vec![0.0; rows * cols] }
     }
-
     pub fn ones(rows: usize, cols: usize) -> Self {
-        Matrix {
-            rows,
-            cols,
-            data: vec![1.0; rows * cols],
-        }
+        Matrix { rows, cols, data: vec![1.0; rows * cols] }
     }
-
     pub fn eye(n: usize) -> Self {
         let mut m = Matrix::zeros(n, n);
-        for i in 0..n {
-            m.data[i * n + i] = 1.0;
-        }
+        for i in 0..n { m.data[i * n + i] = 1.0; }
         m
     }
-
     pub fn get(&self, r: usize, c: usize) -> f64 {
         self.data[r * self.cols + c]
     }
-
     pub fn set(&mut self, r: usize, c: usize, v: f64) {
         self.data[r * self.cols + c] = v;
     }
-
     pub fn is_scalar(&self) -> bool {
         self.rows == 1 && self.cols == 1
     }
@@ -64,7 +48,6 @@ impl Value {
             _ => None,
         }
     }
-
     pub fn as_matrix(&self) -> Matrix {
         match self {
             Value::Scalar(n) => Matrix::new(1, 1, vec![*n]),
@@ -73,32 +56,43 @@ impl Value {
     }
 }
 
+fn format_scalar(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        let s = format!("{:.4}", n);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Value::Scalar(n) => {
-                // Kalau bilangan bulat, tampilkan tanpa .0
-                if n.fract() == 0.0 && n.abs() < 1e15 {
-                    write!(f, "{}", *n as i64)
-                } else {
-                    write!(f, "{}", n)
-                }
-            }
+            Value::Scalar(n) => write!(f, "{}", format_scalar(*n)),
             Value::Matrix(m) => {
                 if m.is_scalar() {
-                    return write!(f, "{}", m.data[0]);
+                    return write!(f, "{}", format_scalar(m.data[0]));
+                }
+                if m.rows == 0 || m.cols == 0 {
+                    return write!(f, "[]");
+                }
+                let mut col_widths = vec![0usize; m.cols];
+                for c in 0..m.cols {
+                    for r in 0..m.rows {
+                        let len = format_scalar(m.get(r, c)).len();
+                        if len > col_widths[c] {
+                            col_widths[c] = len;
+                        }
+                    }
                 }
                 for r in 0..m.rows {
+                    write!(f, "  ")?;
                     for c in 0..m.cols {
                         if c > 0 {
                             write!(f, "  ")?;
                         }
-                        let v = m.get(r, c);
-                        if v.fract() == 0.0 && v.abs() < 1e15 {
-                            write!(f, "{:>4}", v as i64)?;
-                        } else {
-                            write!(f, "{:>8.4}", v)?;
-                        }
+                        let s = format_scalar(m.get(r, c));
+                        write!(f, "{:>width$}", s, width = col_widths[c])?;
                     }
                     if r < m.rows - 1 {
                         writeln!(f)?;

@@ -7,17 +7,28 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    MatrixLit {
+        rows: Vec<Vec<Expr>>,   // baris demi baris
+    },
+    Transpose(Box<Expr>),
+    Call {
+        name: String,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     Add,
     Sub,
-    Mul,
-    Div,
+    Mul,       // matrix multiplication
+    Div,       // matrix division (right-div, nanti)
+    EMul,      // .*
+    EDiv,      // ./
+    EPow,      // .^
+    Pow,       // ^
 }
 
-// Statement: sesuatu yang tidak menghasilkan nilai (misal assignment)
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Assign { name: String, value: Expr },

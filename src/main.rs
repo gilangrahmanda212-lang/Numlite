@@ -49,15 +49,61 @@ fn main() {
         match stmt {
             Stmt::Assign { name, value } => match eval(&value, &env) {
                 Ok(v) => {
-                    println!("{} = {}", name, v);
+                    println!("{} =", name);
+                    print_value(&v);
                     env.insert(name, v);
                 }
                 Err(e) => println!("Eval error: {}", e),
             },
             Stmt::Expr(expr) => match eval(&expr, &env) {
-                Ok(v) => println!("ans = {}", v),
+                Ok(v) => {
+                    println!("ans =");
+                    print_value(&v);
+                }
                 Err(e) => println!("Eval error: {}", e),
             },
         }
+    }
+}
+
+fn print_value(v: &numlite::value::Value) {
+    use numlite::value::Value;
+    match v {
+        Value::Scalar(n) => println!("  {}", format_num(*n)),
+        Value::Matrix(m) => {
+            if m.rows == 0 || m.cols == 0 {
+                println!("  []");
+                return;
+            }
+            let mut col_widths = vec![0usize; m.cols];
+            for c in 0..m.cols {
+                for r in 0..m.rows {
+                    let len = format_num(m.get(r, c)).len();
+                    if len > col_widths[c] {
+                        col_widths[c] = len;
+                    }
+                }
+            }
+            for r in 0..m.rows {
+                print!("  ");
+                for c in 0..m.cols {
+                    if c > 0 {
+                        print!("  ");
+                    }
+                    let s = format_num(m.get(r, c));
+                    print!("{:>width$}", s, width = col_widths[c]);
+                }
+                println!();
+            }
+        }
+    }
+}
+
+fn format_num(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        let s = format!("{:.4}", n);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
     }
 }

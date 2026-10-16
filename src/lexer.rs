@@ -17,6 +17,10 @@ impl Lexer {
         self.input.get(self.pos).copied()
     }
 
+    fn peek2(&self) -> Option<char> {
+        self.input.get(self.pos + 1).copied()
+    }
+
     fn advance(&mut self) -> Option<char> {
         let c = self.peek();
         if c.is_some() {
@@ -39,6 +43,15 @@ impl Lexer {
         let mut s = String::new();
         while let Some(c) = self.peek() {
             if c.is_ascii_digit() || c == '.' {
+                // Hati-hati: '.' bisa jadi awal DotStar (.*)
+                if c == '.' && !s.is_empty() {
+                    // Cek apakah ini desimal atau operator .*
+                    if let Some(next) = self.peek2() {
+                        if !next.is_ascii_digit() {
+                            break; // bukan desimal, berhenti
+                        }
+                    }
+                }
                 s.push(c);
                 self.advance();
             } else {
@@ -77,9 +90,43 @@ impl Lexer {
             };
 
             let token = match c {
-                '0'..='9' | '.' => {
+                '0'..='9' => {
                     let n = self.read_number()?;
                     Token::Number(n)
+                }
+                '.' => {
+                    // '.' bisa jadi desimal (.5) atau DotStar/DotSlash/DotCaret
+                    if let Some(next) = self.peek2() {
+                        match next {
+                            '*' => {
+                                self.advance();
+                                self.advance();
+                                Token::DotStar
+                            }
+                            '/' => {
+                                self.advance();
+                                self.advance();
+                                Token::DotSlash
+                            }
+                            '^' => {
+                                self.advance();
+                                self.advance();
+                                Token::DotCaret
+                            }
+                            '0'..='9' => {
+                                let n = self.read_number()?;
+                                Token::Number(n)
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "Karakter '.' tidak valid di posisi {}",
+                                    self.pos
+                                ));
+                            }
+                        }
+                    } else {
+                        return Err("Karakter '.' di akhir input".to_string());
+                    }
                 }
                 'a'..='z' | 'A'..='Z' | '_' => {
                     let ident = self.read_identifier();
@@ -92,6 +139,12 @@ impl Lexer {
                 '=' => { self.advance(); Token::Assign }
                 '(' => { self.advance(); Token::LParen }
                 ')' => { self.advance(); Token::RParen }
+                '[' => { self.advance(); Token::LBracket }
+                ']' => { self.advance(); Token::RBracket }
+                ',' => { self.advance(); Token::Comma }
+                ';' => { self.advance(); Token::Semicolon }
+                '\'' => { self.advance(); Token::Transpose }
+                '^' => { self.advance(); Token::Caret }
                 _ => return Err(format!("Karakter tidak dikenal: '{}'", c)),
             };
 
