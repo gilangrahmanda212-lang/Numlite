@@ -1,6 +1,7 @@
 #[derive(Debug, Clone)]
 pub enum Expr {
     Number(f64),
+    Var(String),
     Binary {
         op: BinOp,
         left: Box<Expr>,
@@ -14,4 +15,11 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+}
+
+// Statement: sesuatu yang tidak menghasilkan nilai (misal assignment)
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    Assign { name: String, value: Expr },
+    Expr(Expr),
 }

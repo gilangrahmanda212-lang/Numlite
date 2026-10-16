@@ -49,6 +49,19 @@ impl Lexer {
             .map_err(|_| format!("Angka tidak valid: {}", s))
     }
 
+    fn read_identifier(&mut self) -> String {
+        let mut s = String::new();
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                s.push(c);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        s
+    }
+
     pub fn tokenize(&mut self) -> Result<Vec<Token>, String> {
         let mut tokens = Vec::new();
 
@@ -68,10 +81,15 @@ impl Lexer {
                     let n = self.read_number()?;
                     Token::Number(n)
                 }
+                'a'..='z' | 'A'..='Z' | '_' => {
+                    let ident = self.read_identifier();
+                    Token::Identifier(ident)
+                }
                 '+' => { self.advance(); Token::Plus }
                 '-' => { self.advance(); Token::Minus }
                 '*' => { self.advance(); Token::Star }
                 '/' => { self.advance(); Token::Slash }
+                '=' => { self.advance(); Token::Assign }
                 '(' => { self.advance(); Token::LParen }
                 ')' => { self.advance(); Token::RParen }
                 _ => return Err(format!("Karakter tidak dikenal: '{}'", c)),

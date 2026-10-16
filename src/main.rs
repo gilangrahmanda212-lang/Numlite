@@ -1,13 +1,15 @@
-
 use std::io::{self, Write};
 
-use numlite::eval::eval;
+use numlite::ast::Stmt;
+use numlite::eval::{eval, Env};
 use numlite::lexer::Lexer;
 use numlite::parser::Parser;
 
 fn main() {
-    println!("NumLite v0.0.2 — MATLAB ringan");
+    println!("NumLite v0.0.3 — MATLAB ringan");
     println!("Ketik 'exit' untuk keluar.\n");
+
+    let mut env: Env = Env::new();
 
     loop {
         print!(">> ");
@@ -38,8 +40,8 @@ fn main() {
 
         // 2. Parse
         let mut parser = Parser::new(tokens);
-        let ast = match parser.parse() {
-            Ok(a) => a,
+        let stmt = match parser.parse_stmt() {
+            Ok(s) => s,
             Err(e) => {
                 println!("Parser error: {}", e);
                 continue;
@@ -47,9 +49,18 @@ fn main() {
         };
 
         // 3. Eval
-        match eval(&ast) {
-            Ok(value) => println!("ans = {}", value),
-            Err(e) => println!("Eval error: {}", e),
+        match stmt {
+            Stmt::Assign { name, value } => match eval(&value, &env) {
+                Ok(v) => {
+                    env.insert(name.clone(), v);
+                    println!("{} = {}", name, v);
+                }
+                Err(e) => println!("Eval error: {}", e),
+            },
+            Stmt::Expr(expr) => match eval(&expr, &env) {
+                Ok(v) => println!("ans = {}", v),
+                Err(e) => println!("Eval error: {}", e),
+            },
         }
     }
 }
