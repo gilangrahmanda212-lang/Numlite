@@ -6,7 +6,7 @@ use numlite::lexer::Lexer;
 use numlite::parser::Parser;
 
 fn main() {
-    println!("NumLite v0.0.3 — MATLAB ringan");
+    println!("NumLite v0.0.4 — MATLAB ringan");
     println!("Ketik 'exit' untuk keluar.\n");
 
     let mut env: Env = Env::new();
@@ -28,7 +28,6 @@ fn main() {
             continue;
         }
 
-        // 1. Tokenize
         let mut lexer = Lexer::new(input);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
@@ -38,7 +37,6 @@ fn main() {
             }
         };
 
-        // 2. Parse
         let mut parser = Parser::new(tokens);
         let stmt = match parser.parse_stmt() {
             Ok(s) => s,
@@ -48,12 +46,11 @@ fn main() {
             }
         };
 
-        // 3. Eval
         match stmt {
             Stmt::Assign { name, value } => match eval(&value, &env) {
                 Ok(v) => {
-                    env.insert(name.clone(), v);
                     println!("{} = {}", name, v);
+                    env.insert(name, v);
                 }
                 Err(e) => println!("Eval error: {}", e),
             },
