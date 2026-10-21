@@ -1,4 +1,8 @@
 use std::io::{self, Write};
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    terminal, cursor, execute,
+};
 
 use numlite::ast::Stmt;
 use numlite::eval::{eval, Env};
@@ -6,7 +10,7 @@ use numlite::lexer::Lexer;
 use numlite::parser::Parser;
 
 fn main() {
-    println!("NumLite (Dalam tahap pengembangan)");
+    println!("NumLite v0.0.5 — MATLAB ringan");
     println!("Ketik 'exit' untuk keluar.\n");
 
     let mut env: Env = Env::new();
@@ -15,10 +19,10 @@ fn main() {
         print!(">> ");
         io::stdout().flush().unwrap();
 
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            break;
-        }
+        let input = match read_line_with_arrows() {
+            Ok(s) => s,
+            Err(_) => break, // Esc ditekan
+        };
 
         let input = input.trim();
         if input == "exit" {
@@ -64,6 +68,84 @@ fn main() {
             },
         }
     }
+}
+
+fn read_line_with_arrows() -> Result<String, ()> {
+    terminal::enable_raw_mode().unwrap();
+    let mut buffer = Vec::new();
+    let mut cursor_pos = 0;
+
+    loop {
+        // Perbaikan: Menambahkan `..` untuk mengabaikan field `kind` dan `state`
+        if let Event::Key(KeyEvent { code, modifiers, .. }) = event::read().unwrap() {
+            
+            // DETEKSI BUG LINUX: Backspace kadang terbaca sebagai Ctrl+h
+            let is_backspace = matches!(code, KeyCode::Backspace) 
+                || (matches!(code, KeyCode::Char('h')) && modifiers.contains(KeyModifiers::CONTROL));
+
+            if is_backspace {
+                if cursor_pos > 0 {
+                    buffer.remove(cursor_pos - 1);
+                    cursor_pos -= 1;
+                    redraw_line(&buffer, cursor_pos);
+                }
+                continue;
+            }
+
+            match code {
+                KeyCode::Enter => {
+                    print!("\r\n");
+                    break;
+                }
+                KeyCode::Char(c) => {
+                    // Abaikan huruf biasa yang ditekan bersamaan dengan Ctrl
+                    if modifiers.contains(KeyModifiers::CONTROL) {
+                        continue; 
+                    }
+                    
+                    if cursor_pos == buffer.len() {
+                        buffer.push(c);
+                        print!("{}", c);
+                    } else {
+                        buffer.insert(cursor_pos, c);
+                        redraw_line(&buffer, cursor_pos + 1);
+                    }
+                    cursor_pos += 1;
+                    io::stdout().flush().unwrap();
+                }
+                KeyCode::Left => {
+                    if cursor_pos > 0 {
+                        cursor_pos -= 1;
+                        execute!(io::stdout(), cursor::MoveLeft(1)).unwrap();
+                    }
+                }
+                KeyCode::Right => {
+                    if cursor_pos < buffer.len() {
+                        cursor_pos += 1;
+                        execute!(io::stdout(), cursor::MoveRight(1)).unwrap();
+                    }
+                }
+                KeyCode::Esc => {
+                    terminal::disable_raw_mode().unwrap();
+                    return Err(());
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    terminal::disable_raw_mode().unwrap();
+    Ok(buffer.into_iter().collect())
+}
+
+fn redraw_line(buffer: &[char], cursor_pos: usize) {
+    // Hapus baris saat ini dan gambar ulang
+    print!("\r\x1b[K>> {}", buffer.iter().collect::<String>());
+    let back = buffer.len() - cursor_pos;
+    if back > 0 {
+        execute!(io::stdout(), cursor::MoveLeft(back as u16)).unwrap();
+    }
+    io::stdout().flush().unwrap();
 }
 
 fn print_value(v: &numlite::value::Value) {
