@@ -118,6 +118,7 @@ fn matrix_mul(l: &Value, r: &Value) -> Result<Value, String> {
 
 pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
     match stmt {
+        // 1. Tangani fungsi run
         Stmt::Expr(Expr::Call { name, args }) if name == "run" => {
             if args.len() != 1 { return Err("run: butuh 1 argumen".to_string()); }
             let filename_val = eval(&args[0], env)?;
@@ -133,15 +134,36 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
             let mut parser = crate::parser::Parser::new(tokens);
             
             while !parser.is_at_eof() {
-                // Mengabaikan error Eof yang tidak perlu di akhir script
                 if let Ok(stmt) = parser.parse_stmt() {
                     exec_stmt(&stmt, env)?;
                 } else {
-                    break; // Hentikan loop jika gagal parse
+                    break; 
                 }
             }
             Ok(())
         }
+        
+        // 2. GUI PLOT HANDLER (Harus diletakkan sebelum fungsi yang diabaikan)
+        Stmt::Expr(Expr::Call { name, args }) if name == "plot" => {
+            if args.len() < 2 { return Err("plot: butuh minimal 2 argumen (x, y)".to_string()); }
+            let x_val = eval(&args[0], env)?;
+            let y_val = eval(&args[1], env)?;
+            let x_mat = x_val.as_matrix();
+            let y_mat = y_val.as_matrix();
+            if x_mat.data.len() != y_mat.data.len() {
+                return Err("plot: panjang x dan y harus sama".to_string());
+            }
+            
+            crate::gui::show_plot(x_mat.data, y_mat.data);
+            Ok(())
+        }
+
+        // 3. Abaikan fungsi visual MATLAB yang tidak berpengaruh di terminal
+        Stmt::Expr(Expr::Call { name, .. }) if name == "subplot" || name == "figure" || name == "title" || name == "grid" || name == "clc" || name == "clear" || name == "close" => {
+            Ok(())
+        }
+
+        // 4. Ekspresi biasa
         Stmt::Expr(expr) => {
             let val = eval(expr, env)?;
             match &val {
@@ -150,6 +172,8 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
             }
             Ok(())
         }
+        
+        // 5. Assignment, For, dan If
         Stmt::Assign { name, value } => {
             let v = eval(value, env)?;
             env.insert(name.clone(), v);

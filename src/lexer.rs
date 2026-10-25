@@ -61,6 +61,14 @@ impl Lexer {
 
             let token = match c {
                 '\n' => { self.advance(); Token::Newline }
+                '%' => {
+                    // Abaikan semua karakter sampai ujung baris
+                    while let Some(ch) = self.peek() {
+                        if ch == '\n' { break; }
+                        self.advance();
+                    }
+                    continue; // Langsung lanjut ke iterasi berikutnya
+                }
                 '0'..='9' => {
                     let n = self.read_number()?;
                     Token::Number(n)
