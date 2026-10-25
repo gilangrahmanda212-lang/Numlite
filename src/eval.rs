@@ -45,9 +45,8 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
             let idx_mat = index_val.as_matrix();
 
             let mut result_data = Vec::new();
-            // Ambil data berdasarkan angka index (1-based)
             for &idx in &idx_mat.data {
-                let i = (idx as usize).saturating_sub(1); // ubah ke 0-based
+                let i = (idx as usize).saturating_sub(1);
                 if i < mat.data.len() {
                     result_data.push(mat.data[i]);
                 } else {
@@ -134,7 +133,7 @@ fn matrix_mul(l: &Value, r: &Value) -> Result<Value, String> {
     elementwise(l, r, |a, b| Ok(a * b))
 }
 
-pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
+pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String) -> Result<(), String> {
     match stmt {
         Stmt::Expr(Expr::Call { name, args }) if name == "run" => {
             if args.len() != 1 { return Err("run: butuh 1 argumen".to_string()); }
@@ -149,51 +148,48 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
             let mut lexer = crate::lexer::Lexer::new(&content);
             let tokens = lexer.tokenize()?;
             let mut parser = crate::parser::Parser::new(tokens);
-            
-            let mut plots = Vec::new();
 
             while !parser.is_at_eof() {
                 if let Ok(stmt) = parser.parse_stmt() {
-                    if let Stmt::Plot { title, x, y } = stmt {
-                        let x_val = eval(&x, env)?.as_matrix();
-                        let y_val = eval(&y, env)?.as_matrix();
-                        if x_val.data.len() != y_val.data.len() {
-                            return Err("plot: panjang x dan y harus sama".to_string());
-                        }
-                        plots.push(crate::gui::PlotData { title, x: x_val.data, y: y_val.data });
-                    } else {
-                        exec_stmt(&stmt, env)?;
-                    }
+                    exec_stmt(&stmt, env, capture_output)?;
                 } else {
                     break; 
                 }
             }
-
-            if !plots.is_empty() {
-                crate::gui::show_plots(plots);
-            }
             Ok(())
         }
-        Stmt::Plot { title, x, y } => {
-            let x_val = eval(x, env)?.as_matrix();
-            let y_val = eval(y, env)?.as_matrix();
-            let plots = vec![crate::gui::PlotData { title: title.clone(), x: x_val.data, y: y_val.data }];
-            crate::gui::show_plots(plots);
-            Ok(())
-        }
+        Stmt::Plot { .. } => Ok(()),
         Stmt::Expr(Expr::Call { name, .. }) if name == "subplot" || name == "figure" || name == "grid" || name == "clc" || name == "clear" || name == "close" => {
             Ok(())
         }
         Stmt::Expr(expr) => {
+            // Cek apakah ini fungsi disp()
+            if let Expr::Call { name, args } = expr {
+                if name == "disp" && args.len() == 1 {
+                    let val = eval(&args[0], env)?;
+                    match val {
+                        Value::Str(s) => capture_output.push_str(&format!("{}\n", s)),
+                        Value::Scalar(n) => capture_output.push_str(&format!("{}\n", n)),
+                        v => capture_output.push_str(&format!("{}\n", v)),
+                    }
+                    return Ok(());
+                }
+            }
+
             let val = eval(expr, env)?;
             match &val {
-                Value::Scalar(n) => println!("ans = {}", n),
-                _ => println!("ans =\n{}", val),
+                Value::Scalar(n) => capture_output.push_str(&format!("ans = {}\n", n)),
+                _ => capture_output.push_str(&format!("ans =\n{}\n", val)),
             }
             Ok(())
         }
         Stmt::Assign { name, value } => {
             let v = eval(value, env)?;
+            // Mencetak nama variabel dan nilainya
+            match &v {
+                Value::Scalar(n) => capture_output.push_str(&format!("{} =\n  {}\n", name, n)),
+                _ => capture_output.push_str(&format!("{} =\n{}\n", name, v)),
+            }
             env.insert(name.clone(), v);
             Ok(())
         }
@@ -201,7 +197,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
             let iter_val = eval(iter, env)?;
             for val in iter_val.as_matrix().data {
                 env.insert(var.clone(), Value::Scalar(val));
-                for s in body { exec_stmt(s, env)?; }
+                for s in body { exec_stmt(s, env, capture_output)?; }
             }
             Ok(())
         }
@@ -209,9 +205,9 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
             let cond_val = eval(cond, env)?;
             let is_true = cond_val.as_scalar().unwrap_or(0.0) != 0.0;
             if is_true {
-                for s in then_body { exec_stmt(s, env)?; }
+                for s in then_body { exec_stmt(s, env, capture_output)?; }
             } else if let Some(eb) = else_body {
-                for s in eb { exec_stmt(s, env)?; }
+                for s in eb { exec_stmt(s, env, capture_output)?; }
             }
             Ok(())
         }
@@ -334,11 +330,10 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
 
         ("disp", 1) => {
             match &args[0] {
-                Value::Str(s) => println!("{}", s),
-                Value::Scalar(n) => println!("{}", n),
-                v => println!("{}", v),
+                Value::Str(s) => return Ok(Value::Str(format!("{}\n", s))),
+                Value::Scalar(n) => return Ok(Value::Str(format!("{}\n", n))),
+                v => return Ok(Value::Str(format!("{}\n", v))),
             }
-            Ok(Value::Scalar(0.0))
         }
         ("cumsum", 1) => {
             let m = args[0].as_matrix();

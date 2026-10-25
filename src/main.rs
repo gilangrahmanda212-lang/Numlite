@@ -1,11 +1,40 @@
+use std::env;
 use std::io::{self, Write};
 use crossterm::{event::{self, Event, KeyCode, KeyEvent, KeyModifiers}, terminal, cursor, execute};
 
+use numlite::ast::Stmt;
 use numlite::eval::{exec_stmt, Env};
 use numlite::lexer::Lexer;
 use numlite::parser::Parser;
+
 fn main() {
-    println!("NumLite v0.0.6 — Dalam tahap pengembangan");
+    let args: Vec<String> = env::args().collect();
+    
+    // Jika ada argumen --cli, jalankan mode terminal
+    if args.len() > 1 && args[1] == "--cli" {
+        run_cli();
+    } else {
+        run_gui();
+    }
+}
+
+fn run_gui() {
+    let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([1000.0, 700.0])
+            .with_title("NumLite - MATLAB Ringan"),
+        ..Default::default()
+    };
+    
+    let _ = eframe::run_native(
+        "NumLite",
+        options,
+        Box::new(|cc| Box::new(numlite::app::NumLiteApp::new(cc))),
+    );
+}
+
+fn run_cli() {
+    println!("NumLite v0.0.6 — Mode Terminal (CLI)");
     println!("Ketik 'exit' untuk keluar.\n");
 
     let mut env: Env = Env::new();
@@ -26,9 +55,7 @@ fn main() {
             let trimmed = line.trim();
             if trimmed == "exit" && !is_multiline { return; }
 
-                        if trimmed.starts_with("for ") || trimmed.starts_with("if ") { 
-                is_multiline = true; 
-            }
+            if trimmed.starts_with("for ") || trimmed.starts_with("if ") { is_multiline = true; }
             if trimmed == "end" { is_multiline = false; }
 
             input.push_str(trimmed);
@@ -48,12 +75,24 @@ fn main() {
 
         let mut parser = Parser::new(tokens);
         
-        loop {
-            if parser.is_at_eof() { break; }
+        while !parser.is_at_eof() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
-                    if let Err(e) = exec_stmt(&stmt, &mut env) {
-                        println!("Eval error: {}", e);
+                    if let Stmt::Plot { title, x, y } = stmt {
+                        let x_val = numlite::eval::eval(&x, &env).unwrap_or(numlite::value::Value::Scalar(0.0)).as_matrix();
+                        let y_val = numlite::eval::eval(&y, &env).unwrap_or(numlite::value::Value::Scalar(0.0)).as_matrix();
+                        // Di CLI, kita hanya mencatat grafik diabaikan
+                        let _ = (title, x_val.data, y_val.data);
+                        println!("[Grafik diabaikan di Mode CLI]");
+                    } else {
+                        // PERBAIKAN: Siapkan buffer untuk menangkap output teks
+                        let mut captured_output = String::new();
+                        if let Err(e) = exec_stmt(&stmt, &mut env, &mut captured_output) {
+                            println!("Eval error: {}", e);
+                        } else {
+                            // Cetak teks (ans/disp) ke terminal
+                            print!("{}", captured_output);
+                        }
                     }
                 }
                 Err(e) => { 
@@ -85,10 +124,7 @@ fn read_line_with_arrows() -> Result<String, ()> {
             }
 
             match code {
-                KeyCode::Enter => {
-                    print!("\r\n");
-                    break;
-                }
+                KeyCode::Enter => { print!("\r\n"); break; }
                 KeyCode::Char(c) => {
                     if modifiers.contains(KeyModifiers::CONTROL) { continue; }
                     if cursor_pos == buffer.len() {
@@ -102,21 +138,12 @@ fn read_line_with_arrows() -> Result<String, ()> {
                     io::stdout().flush().unwrap();
                 }
                 KeyCode::Left => {
-                    if cursor_pos > 0 {
-                        cursor_pos -= 1;
-                        execute!(io::stdout(), cursor::MoveLeft(1)).unwrap();
-                    }
+                    if cursor_pos > 0 { cursor_pos -= 1; execute!(io::stdout(), cursor::MoveLeft(1)).unwrap(); }
                 }
                 KeyCode::Right => {
-                    if cursor_pos < buffer.len() {
-                        cursor_pos += 1;
-                        execute!(io::stdout(), cursor::MoveRight(1)).unwrap();
-                    }
+                    if cursor_pos < buffer.len() { cursor_pos += 1; execute!(io::stdout(), cursor::MoveRight(1)).unwrap(); }
                 }
-                KeyCode::Esc => {
-                    terminal::disable_raw_mode().unwrap();
-                    return Err(());
-                }
+                KeyCode::Esc => { terminal::disable_raw_mode().unwrap(); return Err(()); }
                 _ => {}
             }
         }
@@ -129,8 +156,6 @@ fn read_line_with_arrows() -> Result<String, ()> {
 fn redraw_line(buffer: &[char], cursor_pos: usize) {
     print!("\r\x1b[K>> {}", buffer.iter().collect::<String>());
     let back = buffer.len() - cursor_pos;
-    if back > 0 {
-        execute!(io::stdout(), cursor::MoveLeft(back as u16)).unwrap();
-    }
+    if back > 0 { execute!(io::stdout(), cursor::MoveLeft(back as u16)).unwrap(); }
     io::stdout().flush().unwrap();
 }
