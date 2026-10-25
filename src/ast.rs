@@ -1,7 +1,7 @@
 #[derive(Debug, Clone)]
 pub enum Expr {
     Number(f64),
-    String(String), // <-- BARU
+    String(String),
     Var(String),
     Binary {
         op: BinOp,
@@ -43,4 +43,5 @@ pub enum Stmt {
         then_body: Vec<Stmt>,
         else_body: Option<Vec<Stmt>>,
     },
+    Plot { title: String, x: Expr, y: Expr },
 }

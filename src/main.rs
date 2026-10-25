@@ -5,7 +5,7 @@ use numlite::eval::{exec_stmt, Env};
 use numlite::lexer::Lexer;
 use numlite::parser::Parser;
 fn main() {
-    println!("NumLite v0.0.6 — MATLAB ringan (Multiline)");
+    println!("NumLite v0.0.6 — Dalam tahap pengembangan");
     println!("Ketik 'exit' untuk keluar.\n");
 
     let mut env: Env = Env::new();

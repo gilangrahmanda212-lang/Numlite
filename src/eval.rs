@@ -118,13 +118,12 @@ fn matrix_mul(l: &Value, r: &Value) -> Result<Value, String> {
 
 pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
     match stmt {
-        // 1. Tangani fungsi run
         Stmt::Expr(Expr::Call { name, args }) if name == "run" => {
             if args.len() != 1 { return Err("run: butuh 1 argumen".to_string()); }
             let filename_val = eval(&args[0], env)?;
             let filename = match filename_val {
                 Value::Str(s) => s,
-                _ => return Err("run: nama file harus string (gunakan '...')".to_string()),
+                _ => return Err("run: nama file harus string".to_string()),
             };
             let content = std::fs::read_to_string(&filename)
                 .map_err(|e| format!("Gagal membaca file {}: {}", filename, e))?;
@@ -133,37 +132,40 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
             let tokens = lexer.tokenize()?;
             let mut parser = crate::parser::Parser::new(tokens);
             
+            let mut plots = Vec::new();
+
             while !parser.is_at_eof() {
                 if let Ok(stmt) = parser.parse_stmt() {
-                    exec_stmt(&stmt, env)?;
+                    if let Stmt::Plot { title, x, y } = stmt {
+                        let x_val = eval(&x, env)?.as_matrix();
+                        let y_val = eval(&y, env)?.as_matrix();
+                        if x_val.data.len() != y_val.data.len() {
+                            return Err("plot: panjang x dan y harus sama".to_string());
+                        }
+                        plots.push(crate::gui::PlotData { title, x: x_val.data, y: y_val.data });
+                    } else {
+                        exec_stmt(&stmt, env)?;
+                    }
                 } else {
                     break; 
                 }
             }
-            Ok(())
-        }
-        
-        // 2. GUI PLOT HANDLER (Harus diletakkan sebelum fungsi yang diabaikan)
-        Stmt::Expr(Expr::Call { name, args }) if name == "plot" => {
-            if args.len() < 2 { return Err("plot: butuh minimal 2 argumen (x, y)".to_string()); }
-            let x_val = eval(&args[0], env)?;
-            let y_val = eval(&args[1], env)?;
-            let x_mat = x_val.as_matrix();
-            let y_mat = y_val.as_matrix();
-            if x_mat.data.len() != y_mat.data.len() {
-                return Err("plot: panjang x dan y harus sama".to_string());
+
+            if !plots.is_empty() {
+                crate::gui::show_plots(plots);
             }
-            
-            crate::gui::show_plot(x_mat.data, y_mat.data);
             Ok(())
         }
-
-        // 3. Abaikan fungsi visual MATLAB yang tidak berpengaruh di terminal
-        Stmt::Expr(Expr::Call { name, .. }) if name == "subplot" || name == "figure" || name == "title" || name == "grid" || name == "clc" || name == "clear" || name == "close" => {
+        Stmt::Plot { title, x, y } => {
+            let x_val = eval(x, env)?.as_matrix();
+            let y_val = eval(y, env)?.as_matrix();
+            let plots = vec![crate::gui::PlotData { title: title.clone(), x: x_val.data, y: y_val.data }];
+            crate::gui::show_plots(plots);
             Ok(())
         }
-
-        // 4. Ekspresi biasa
+        Stmt::Expr(Expr::Call { name, .. }) if name == "subplot" || name == "figure" || name == "grid" || name == "clc" || name == "clear" || name == "close" => {
+            Ok(())
+        }
         Stmt::Expr(expr) => {
             let val = eval(expr, env)?;
             match &val {
@@ -172,8 +174,6 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
             }
             Ok(())
         }
-        
-        // 5. Assignment, For, dan If
         Stmt::Assign { name, value } => {
             let v = eval(value, env)?;
             env.insert(name.clone(), v);
@@ -302,6 +302,25 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             data.extend_from_slice(&re);
             data.extend_from_slice(&im);
             Ok(Value::Matrix(Matrix::new(2, n, data)))
+        }
+
+        ("disp", 1) => {
+            match &args[0] {
+                Value::Str(s) => println!("{}", s),
+                Value::Scalar(n) => println!("{}", n),
+                v => println!("{}", v),
+            }
+            Ok(Value::Scalar(0.0))
+        }
+        ("cumsum", 1) => {
+            let m = args[0].as_matrix();
+            let mut data = Vec::with_capacity(m.data.len());
+            let mut sum = 0.0;
+            for &v in &m.data {
+                sum += v;
+                data.push(sum);
+            }
+            Ok(Value::Matrix(Matrix::new(1, data.len(), data)))
         }
         
         _ => Err(format!("Fungsi '{}' dengan {} argumen belum didukung", name, args.len())),

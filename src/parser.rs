@@ -4,17 +4,15 @@ use crate::token::Token;
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    current_title: String,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        Parser { tokens, pos: 0, current_title: String::new() }
     }
 
-    pub fn is_at_eof(&self) -> bool {
-        self.peek() == &Token::Eof
-    }
-
+    pub fn is_at_eof(&self) -> bool { self.peek() == &Token::Eof }
     fn peek(&self) -> &Token { self.tokens.get(self.pos).unwrap_or(&Token::Eof) }
     fn advance(&mut self) -> Token {
         let tok = self.peek().clone();
@@ -22,7 +20,7 @@ impl Parser {
         tok
     }
     fn skip_newlines(&mut self) {
-        while self.peek() == &Token::Newline { self.advance(); }
+        while self.peek() == &Token::Newline || self.peek() == &Token::Semicolon { self.advance(); }
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt, String> {
@@ -81,10 +79,46 @@ impl Parser {
         }
 
         if let Token::Identifier(name) = self.peek().clone() {
-            if self.tokens.get(self.pos + 1) == Some(&Token::Assign) {
+            let next_tok = self.tokens.get(self.pos + 1);
+            if next_tok == Some(&Token::LParen) {
+                self.advance(); self.advance();
+                let mut args = Vec::new();
+                if self.peek() != &Token::RParen {
+                    args.push(self.parse_range()?);
+                    while self.peek() == &Token::Comma {
+                        self.advance();
+                        args.push(self.parse_range()?);
+                    }
+                }
+                match self.advance() {
+                    Token::RParen => {
+                        match name.as_str() {
+                            "title" => {
+                                if let Some(Expr::String(s)) = args.get(0) {
+                                    self.current_title = s.clone();
+                                }
+                                return Ok(Stmt::Expr(Expr::Number(0.0)));
+                            }
+                            "plot" => {
+                                if args.len() >= 2 {
+                                    let title = self.current_title.clone();
+                                    self.current_title = String::new();
+                                    return Ok(Stmt::Plot { title, x: args[0].clone(), y: args[1].clone() });
+                                }
+                            }
+                            _ => {}
+                        }
+                        return Ok(Stmt::Expr(Expr::Call { name, args }));
+                    }
+                    t => return Err(format!("Diharapkan ')', dapat {:?}", t)),
+                }
+            } else if next_tok == Some(&Token::Assign) {
                 self.advance(); self.advance();
                 let value = self.parse_range()?;
                 return Ok(Stmt::Assign { name, value });
+            } else {
+                self.advance();
+                return Ok(Stmt::Expr(Expr::Var(name)));
             }
         }
 
@@ -97,21 +131,12 @@ impl Parser {
         while self.peek() == &Token::Colon {
             self.advance();
             let next = self.parse_expr()?;
-            
             if self.peek() == &Token::Colon {
                 self.advance();
                 let end = self.parse_expr()?;
-                start = Expr::Range {
-                    start: Box::new(start),
-                    step: Some(Box::new(next)),
-                    end: Box::new(end),
-                };
+                start = Expr::Range { start: Box::new(start), step: Some(Box::new(next)), end: Box::new(end) };
             } else {
-                start = Expr::Range {
-                    start: Box::new(start),
-                    step: None,
-                    end: Box::new(next),
-                };
+                start = Expr::Range { start: Box::new(start), step: None, end: Box::new(next) };
             }
         }
         Ok(start)
@@ -188,24 +213,8 @@ impl Parser {
     fn parse_factor(&mut self) -> Result<Expr, String> {
         match self.advance() {
             Token::Number(n) => Ok(Expr::Number(n)),
-            Token::String(s) => Ok(Expr::String(s)), // <-- Dukungan String untuk Script
-            Token::Identifier(name) => {
-                if self.peek() == &Token::LParen {
-                    self.advance();
-                    let mut args = Vec::new();
-                    if self.peek() != &Token::RParen {
-                        args.push(self.parse_range()?);
-                        while self.peek() == &Token::Comma {
-                            self.advance();
-                            args.push(self.parse_range()?);
-                        }
-                    }
-                    match self.advance() {
-                        Token::RParen => Ok(Expr::Call { name, args }),
-                        t => Err(format!("Diharapkan ')', dapat {:?}", t)),
-                    }
-                } else { Ok(Expr::Var(name)) }
-            }
+            Token::String(s) => Ok(Expr::String(s)),
+            Token::Identifier(name) => Ok(Expr::Var(name)),
             Token::LParen => {
                 let expr = self.parse_range()?;
                 match self.advance() {
@@ -232,6 +241,7 @@ impl Parser {
                 Token::Comma => { self.advance(); }
                 Token::Semicolon => { self.advance(); rows.push(current_row); current_row = Vec::new(); }
                 Token::RBracket => { self.advance(); rows.push(current_row); break; }
+                Token::Newline => { self.advance(); rows.push(current_row); current_row = Vec::new(); }
                 t => return Err(format!("Diharapkan ',', ';', atau ']', dapat {:?}", t)),
             }
         }
