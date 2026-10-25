@@ -119,7 +119,20 @@ impl Lexer {
                 ']' => { self.advance(); Token::RBracket }
                 ',' => { self.advance(); Token::Comma }
                 ';' => { self.advance(); Token::Semicolon }
-                '\'' => { self.advance(); Token::Transpose }
+                ':' => { self.advance(); Token::Colon }
+                '\'' => {
+                    self.advance();
+                    let mut s = String::new();
+                    while let Some(ch) = self.peek() {
+                        if ch == '\'' {
+                            self.advance();
+                            break;
+                        }
+                        s.push(ch);
+                        self.advance();
+                    }
+                    Token::String(s)
+                }
                 '^' => { self.advance(); Token::Caret }
                 _ => return Err(format!("Karakter tidak dikenal: '{}'", c)),
             };

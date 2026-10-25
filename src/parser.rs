@@ -38,7 +38,7 @@ impl Parser {
             if self.advance() != Token::Assign {
                 return Err("Diharapkan '=' setelah variabel loop".to_string());
             }
-            let iter = self.parse_expr()?;
+            let iter = self.parse_range()?;
             self.skip_newlines();
             let mut body = Vec::new();
             loop {
@@ -52,7 +52,7 @@ impl Parser {
 
         if self.peek() == &Token::If {
             self.advance();
-            let cond = self.parse_expr()?;
+            let cond = self.parse_range()?;
             self.skip_newlines();
             
             let mut then_body = Vec::new();
@@ -83,13 +83,38 @@ impl Parser {
         if let Token::Identifier(name) = self.peek().clone() {
             if self.tokens.get(self.pos + 1) == Some(&Token::Assign) {
                 self.advance(); self.advance();
-                let value = self.parse_expr()?;
+                let value = self.parse_range()?;
                 return Ok(Stmt::Assign { name, value });
             }
         }
 
-        let expr = self.parse_expr()?;
+        let expr = self.parse_range()?;
         Ok(Stmt::Expr(expr))
+    }
+
+    pub fn parse_range(&mut self) -> Result<Expr, String> {
+        let mut start = self.parse_expr()?;
+        while self.peek() == &Token::Colon {
+            self.advance();
+            let next = self.parse_expr()?;
+            
+            if self.peek() == &Token::Colon {
+                self.advance();
+                let end = self.parse_expr()?;
+                start = Expr::Range {
+                    start: Box::new(start),
+                    step: Some(Box::new(next)),
+                    end: Box::new(end),
+                };
+            } else {
+                start = Expr::Range {
+                    start: Box::new(start),
+                    step: None,
+                    end: Box::new(next),
+                };
+            }
+        }
+        Ok(start)
     }
 
     fn parse_expr(&mut self) -> Result<Expr, String> {
@@ -163,15 +188,16 @@ impl Parser {
     fn parse_factor(&mut self) -> Result<Expr, String> {
         match self.advance() {
             Token::Number(n) => Ok(Expr::Number(n)),
+            Token::String(s) => Ok(Expr::String(s)), // <-- Dukungan String untuk Script
             Token::Identifier(name) => {
                 if self.peek() == &Token::LParen {
                     self.advance();
                     let mut args = Vec::new();
                     if self.peek() != &Token::RParen {
-                        args.push(self.parse_expr()?);
+                        args.push(self.parse_range()?);
                         while self.peek() == &Token::Comma {
                             self.advance();
-                            args.push(self.parse_expr()?);
+                            args.push(self.parse_range()?);
                         }
                     }
                     match self.advance() {
@@ -181,7 +207,7 @@ impl Parser {
                 } else { Ok(Expr::Var(name)) }
             }
             Token::LParen => {
-                let expr = self.parse_expr()?;
+                let expr = self.parse_range()?;
                 match self.advance() {
                     Token::RParen => Ok(expr),
                     t => Err(format!("Diharapkan ')', dapat {:?}", t)),
@@ -200,7 +226,7 @@ impl Parser {
             return Ok(Expr::MatrixLit { rows: Vec::new() });
         }
         loop {
-            let expr = self.parse_expr()?;
+            let expr = self.parse_range()?;
             current_row.push(expr);
             match self.peek() {
                 Token::Comma => { self.advance(); }

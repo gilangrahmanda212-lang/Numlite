@@ -4,6 +4,7 @@ use std::fmt;
 pub enum Value {
     Scalar(f64),
     Matrix(Matrix),
+    Str(String), // <-- BARU
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,15 +30,9 @@ impl Matrix {
         for i in 0..n { m.data[i * n + i] = 1.0; }
         m
     }
-    pub fn get(&self, r: usize, c: usize) -> f64 {
-        self.data[r * self.cols + c]
-    }
-    pub fn set(&mut self, r: usize, c: usize, v: f64) {
-        self.data[r * self.cols + c] = v;
-    }
-    pub fn is_scalar(&self) -> bool {
-        self.rows == 1 && self.cols == 1
-    }
+    pub fn get(&self, r: usize, c: usize) -> f64 { self.data[r * self.cols + c] }
+    pub fn set(&mut self, r: usize, c: usize, v: f64) { self.data[r * self.cols + c] = v; }
+    pub fn is_scalar(&self) -> bool { self.rows == 1 && self.cols == 1 }
 }
 
 impl Value {
@@ -52,6 +47,7 @@ impl Value {
         match self {
             Value::Scalar(n) => Matrix::new(1, 1, vec![*n]),
             Value::Matrix(m) => m.clone(),
+            Value::Str(_) => Matrix::new(0, 0, vec![]),
         }
     }
 }
@@ -69,34 +65,25 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Value::Scalar(n) => write!(f, "{}", format_scalar(*n)),
+            Value::Str(s) => write!(f, "\"{}\"", s),
             Value::Matrix(m) => {
-                if m.is_scalar() {
-                    return write!(f, "{}", format_scalar(m.data[0]));
-                }
-                if m.rows == 0 || m.cols == 0 {
-                    return write!(f, "[]");
-                }
+                if m.is_scalar() { return write!(f, "{}", format_scalar(m.data[0])); }
+                if m.rows == 0 || m.cols == 0 { return write!(f, "[]"); }
                 let mut col_widths = vec![0usize; m.cols];
                 for c in 0..m.cols {
                     for r in 0..m.rows {
                         let len = format_scalar(m.get(r, c)).len();
-                        if len > col_widths[c] {
-                            col_widths[c] = len;
-                        }
+                        if len > col_widths[c] { col_widths[c] = len; }
                     }
                 }
                 for r in 0..m.rows {
                     write!(f, "  ")?;
                     for c in 0..m.cols {
-                        if c > 0 {
-                            write!(f, "  ")?;
-                        }
+                        if c > 0 { write!(f, "  ")?; }
                         let s = format_scalar(m.get(r, c));
                         write!(f, "{:>width$}", s, width = col_widths[c])?;
                     }
-                    if r < m.rows - 1 {
-                        writeln!(f)?;
-                    }
+                    if r < m.rows - 1 { writeln!(f)?; }
                 }
                 Ok(())
             }

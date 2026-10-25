@@ -1,6 +1,7 @@
 #[derive(Debug, Clone)]
 pub enum Expr {
     Number(f64),
+    String(String), // <-- BARU
     Var(String),
     Binary {
         op: BinOp,
@@ -14,6 +15,11 @@ pub enum Expr {
     Call {
         name: String,
         args: Vec<Expr>,
+    },
+    Range {
+        start: Box<Expr>,
+        step: Option<Box<Expr>>,
+        end: Box<Expr>,
     },
 }
 

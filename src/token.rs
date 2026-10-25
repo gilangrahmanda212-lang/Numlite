@@ -2,6 +2,7 @@
 pub enum Token {
     Number(f64),
     Identifier(String),
+    String(String),  // <-- BARU: Untuk nama file
     Plus,
     Minus,
     Star,
@@ -10,24 +11,25 @@ pub enum Token {
     DotSlash,
     DotCaret,
     Assign,
-    Eq,       // ==
-    Neq,      // !=
-    Lt,       // <
-    Gt,       // >
-    Le,       // <=
-    Ge,       // >=
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
     LParen,
     RParen,
     LBracket,
     RBracket,
     Comma,
     Semicolon,
+    Colon,
     Transpose,
     Caret,
     Newline,
     For,
-    If,       // <-- BARU
-    Else,     // <-- BARU
+    If,
+    Else,
     End,
     Eof,
 }
@@ -38,6 +40,7 @@ impl Token {
         match self {
             Token::Number(n) => format!("Number({})", n),
             Token::Identifier(s) => format!("Identifier({})", s),
+            Token::String(s) => format!("String(\"{}\")", s),
             Token::Plus => "Plus".to_string(),
             Token::Minus => "Minus".to_string(),
             Token::Star => "Star".to_string(),
@@ -58,6 +61,7 @@ impl Token {
             Token::RBracket => "RBracket".to_string(),
             Token::Comma => "Comma".to_string(),
             Token::Semicolon => "Semicolon".to_string(),
+            Token::Colon => "Colon".to_string(),
             Token::Transpose => "Transpose".to_string(),
             Token::Caret => "Caret".to_string(),
             Token::Newline => "Newline".to_string(),

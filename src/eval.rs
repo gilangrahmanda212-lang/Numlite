@@ -7,6 +7,7 @@ pub type Env = HashMap<String, Value>;
 pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
     match expr {
         Expr::Number(n) => Ok(Value::Scalar(*n)),
+        Expr::String(s) => Ok(Value::Str(s.clone())),
         Expr::Var(name) => env.get(name).cloned().ok_or_else(|| format!("Variabel '{}' belum didefinisikan", name)),
         Expr::Binary { op, left, right } => {
             let l = eval(left, env)?;
@@ -22,6 +23,20 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
             let mut values = Vec::new();
             for arg in args { values.push(eval(arg, env)?); }
             call_builtin(name, &values)
+        }
+        Expr::Range { start, step, end } => {
+            let start_val = eval(start, env)?.as_scalar().ok_or("Range: start harus scalar")?;
+            let end_val = eval(end, env)?.as_scalar().ok_or("Range: end harus scalar")?;
+            let step_val = if let Some(s) = step { eval(s, env)?.as_scalar().ok_or("Range: step harus scalar")? } else { 1.0 };
+            if step_val == 0.0 { return Err("Range: step tidak boleh 0".to_string()); }
+            let mut data = Vec::new();
+            let mut current = start_val;
+            if step_val > 0.0 {
+                while current <= end_val + 1e-9 { data.push(current); current += step_val; }
+            } else {
+                while current >= end_val - 1e-9 { data.push(current); current += step_val; }
+            }
+            Ok(Value::Matrix(Matrix::new(1, data.len(), data)))
         }
     }
 }
@@ -103,6 +118,30 @@ fn matrix_mul(l: &Value, r: &Value) -> Result<Value, String> {
 
 pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
     match stmt {
+        Stmt::Expr(Expr::Call { name, args }) if name == "run" => {
+            if args.len() != 1 { return Err("run: butuh 1 argumen".to_string()); }
+            let filename_val = eval(&args[0], env)?;
+            let filename = match filename_val {
+                Value::Str(s) => s,
+                _ => return Err("run: nama file harus string (gunakan '...')".to_string()),
+            };
+            let content = std::fs::read_to_string(&filename)
+                .map_err(|e| format!("Gagal membaca file {}: {}", filename, e))?;
+            
+            let mut lexer = crate::lexer::Lexer::new(&content);
+            let tokens = lexer.tokenize()?;
+            let mut parser = crate::parser::Parser::new(tokens);
+            
+            while !parser.is_at_eof() {
+                // Mengabaikan error Eof yang tidak perlu di akhir script
+                if let Ok(stmt) = parser.parse_stmt() {
+                    exec_stmt(&stmt, env)?;
+                } else {
+                    break; // Hentikan loop jika gagal parse
+                }
+            }
+            Ok(())
+        }
         Stmt::Expr(expr) => {
             let val = eval(expr, env)?;
             match &val {
@@ -127,7 +166,6 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
         Stmt::If { cond, then_body, else_body } => {
             let cond_val = eval(cond, env)?;
             let is_true = cond_val.as_scalar().unwrap_or(0.0) != 0.0;
-            
             if is_true {
                 for s in then_body { exec_stmt(s, env)?; }
             } else if let Some(eb) = else_body {
@@ -226,9 +264,7 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
 
         ("ifft", 1) => {
             let m = args[0].as_matrix();
-            if m.rows != 2 {
-                return Err("ifft: input harus matriks 2xN".to_string());
-            }
+            if m.rows != 2 { return Err("ifft: input harus matriks 2xN".to_string()); }
             let n = m.cols;
             let mut re: Vec<f64> = m.data[0..n].to_vec();
             let mut im: Vec<f64> = m.data[n..2*n].to_vec();
@@ -258,6 +294,7 @@ where F: Fn(f64) -> f64,
             for v in result.data.iter_mut() { *v = f(*v); }
             Ok(Value::Matrix(result))
         }
+        Value::Str(_) => Err(format!("{}: tidak bisa memproses tipe String", name)),
     }.map_err(|e: String| format!("{}: {}", name, e))
 }
 
