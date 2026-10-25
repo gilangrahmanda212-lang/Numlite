@@ -214,7 +214,43 @@ impl Parser {
         match self.advance() {
             Token::Number(n) => Ok(Expr::Number(n)),
             Token::String(s) => Ok(Expr::String(s)),
-            Token::Identifier(name) => Ok(Expr::Var(name)),
+            Token::Identifier(name) => {
+                if self.peek() == &Token::LParen {
+                    // Kita harus membedakan antara fungsi sin(x) dan slicing x(1:5)
+                    // Kita simpan posisi sekarang, dan coba parse isi kurung
+                    self.advance();
+                    if self.peek() == &Token::RParen {
+                        self.advance();
+                        return Ok(Expr::Call { name, args: vec![] });
+                    }
+                    
+                    let first_arg = self.parse_range()?;
+                    
+                    if self.peek() == &Token::RParen {
+                        self.advance();
+                        // Jika isinya adalah Range (menggunakan ':'), berarti ini SLICING
+                        if let Expr::Range { .. } = first_arg {
+                            return Ok(Expr::Index { target: Box::new(Expr::Var(name)), index: Box::new(first_arg) });
+                        } else {
+                            // Jika isinya angka biasa (misal: zeros(3)), berarti ini FUNCTION CALL
+                            return Ok(Expr::Call { name, args: vec![first_arg] });
+                        }
+                    }
+                    
+                    // Jika ada koma, berarti ini multi-argumen Function Call (misal: zeros(2, 3))
+                    let mut args = vec![first_arg];
+                    while self.peek() == &Token::Comma {
+                        self.advance();
+                        args.push(self.parse_range()?);
+                    }
+                    match self.advance() {
+                        Token::RParen => Ok(Expr::Call { name, args }),
+                        t => Err(format!("Diharapkan ')', dapat {:?}", t)),
+                    }
+                } else {
+                    Ok(Expr::Var(name))
+                }
+            }
             Token::LParen => {
                 let expr = self.parse_range()?;
                 match self.advance() {

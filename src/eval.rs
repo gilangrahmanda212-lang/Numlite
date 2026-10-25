@@ -38,6 +38,24 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
             }
             Ok(Value::Matrix(Matrix::new(1, data.len(), data)))
         }
+        Expr::Index { target, index } => {
+            let target_val = eval(target, env)?;
+            let mat = target_val.as_matrix();
+            let index_val = eval(index, env)?;
+            let idx_mat = index_val.as_matrix();
+
+            let mut result_data = Vec::new();
+            // Ambil data berdasarkan angka index (1-based)
+            for &idx in &idx_mat.data {
+                let i = (idx as usize).saturating_sub(1); // ubah ke 0-based
+                if i < mat.data.len() {
+                    result_data.push(mat.data[i]);
+                } else {
+                    return Err(format!("Index {} di luar batas array", idx));
+                }
+            }
+            Ok(Value::Matrix(Matrix::new(1, result_data.len(), result_data)))
+        }
     }
 }
 
@@ -269,6 +287,16 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             let m = args[0].as_matrix();
             let sum: f64 = m.data.iter().sum();
             Ok(Value::Scalar(sum))
+        }
+
+        ("max", 1) => {
+            let m = args[0].as_matrix();
+            if m.data.is_empty() { return Ok(Value::Scalar(0.0)); }
+            let mut max_val = f64::NEG_INFINITY;
+            for &v in &m.data {
+                if v > max_val { max_val = v; }
+            }
+            Ok(Value::Scalar(max_val))
         }
 
         ("fft", 1) => {

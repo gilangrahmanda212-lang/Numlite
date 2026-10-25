@@ -21,6 +21,11 @@ pub enum Expr {
         step: Option<Box<Expr>>,
         end: Box<Expr>,
     },
+    // TAMBAHAN BARU: Untuk Slicing / Indexing
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
