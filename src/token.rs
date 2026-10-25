@@ -6,18 +6,29 @@ pub enum Token {
     Minus,
     Star,
     Slash,
-    DotStar,     // .*
-    DotSlash,    // ./
-    DotCaret,    // .^
-    Assign,      // =
+    DotStar,
+    DotSlash,
+    DotCaret,
+    Assign,
+    Eq,       // ==
+    Neq,      // !=
+    Lt,       // <
+    Gt,       // >
+    Le,       // <=
+    Ge,       // >=
     LParen,
     RParen,
-    LBracket,    // [
-    RBracket,    // ]
-    Comma,       // ,
-    Semicolon,   // ;
-    Transpose,   // '
-    Caret,       // ^ (nanti untuk power)
+    LBracket,
+    RBracket,
+    Comma,
+    Semicolon,
+    Transpose,
+    Caret,
+    Newline,
+    For,
+    If,       // <-- BARU
+    Else,     // <-- BARU
+    End,
     Eof,
 }
 
@@ -35,6 +46,12 @@ impl Token {
             Token::DotSlash => "DotSlash".to_string(),
             Token::DotCaret => "DotCaret".to_string(),
             Token::Assign => "Assign".to_string(),
+            Token::Eq => "Eq".to_string(),
+            Token::Neq => "Neq".to_string(),
+            Token::Lt => "Lt".to_string(),
+            Token::Gt => "Gt".to_string(),
+            Token::Le => "Le".to_string(),
+            Token::Ge => "Ge".to_string(),
             Token::LParen => "LParen".to_string(),
             Token::RParen => "RParen".to_string(),
             Token::LBracket => "LBracket".to_string(),
@@ -43,6 +60,11 @@ impl Token {
             Token::Semicolon => "Semicolon".to_string(),
             Token::Transpose => "Transpose".to_string(),
             Token::Caret => "Caret".to_string(),
+            Token::Newline => "Newline".to_string(),
+            Token::For => "For".to_string(),
+            Token::If => "If".to_string(),
+            Token::Else => "Else".to_string(),
+            Token::End => "End".to_string(),
             Token::Eof => "Eof".to_string(),
         }
     }

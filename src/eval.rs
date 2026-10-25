@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::ast::{BinOp, Expr};
+use crate::ast::{BinOp, Expr, Stmt};
 use crate::value::{Matrix, Value};
 
 pub type Env = HashMap<String, Value>;
@@ -7,10 +7,7 @@ pub type Env = HashMap<String, Value>;
 pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
     match expr {
         Expr::Number(n) => Ok(Value::Scalar(*n)),
-        Expr::Var(name) => env
-            .get(name)
-            .cloned()
-            .ok_or_else(|| format!("Variabel '{}' belum didefinisikan", name)),
+        Expr::Var(name) => env.get(name).cloned().ok_or_else(|| format!("Variabel '{}' belum didefinisikan", name)),
         Expr::Binary { op, left, right } => {
             let l = eval(left, env)?;
             let r = eval(right, env)?;
@@ -19,46 +16,33 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
         Expr::MatrixLit { rows } => eval_matrix_lit(rows, env),
         Expr::Transpose(inner) => {
             let v = eval(inner, env)?;
-            let m = v.as_matrix();
-            Ok(Value::Matrix(transpose(&m)))
+            Ok(Value::Matrix(transpose(&v.as_matrix())))
         }
         Expr::Call { name, args } => {
             let mut values = Vec::new();
-            for arg in args {
-                values.push(eval(arg, env)?);
-            }
+            for arg in args { values.push(eval(arg, env)?); }
             call_builtin(name, &values)
         }
     }
 }
 
 fn eval_matrix_lit(rows: &[Vec<Expr>], env: &Env) -> Result<Value, String> {
-    if rows.is_empty() {
-        return Ok(Value::Matrix(Matrix::zeros(0, 0)));
-    }
-    let nrows = rows.len();
-    let ncols = rows[0].len();
-    let mut data = Vec::with_capacity(nrows * ncols);
+    if rows.is_empty() { return Ok(Value::Matrix(Matrix::zeros(0, 0))); }
+    let mut data = Vec::new();
     for row in rows {
         for cell in row {
-            let v = eval(cell, env)?;
-            let s = v.as_scalar().ok_or_else(|| {
-                "Elemen matriks harus scalar".to_string()
-            })?;
-            data.push(s);
+            data.push(eval(cell, env)?.as_scalar().ok_or("Elemen harus scalar")?);
         }
     }
-    Ok(Value::Matrix(Matrix::new(nrows, ncols, data)))
+    Ok(Value::Matrix(Matrix::new(rows.len(), rows[0].len(), data)))
 }
 
 fn transpose(m: &Matrix) -> Matrix {
-    let mut result = Matrix::zeros(m.cols, m.rows);
+    let mut res = Matrix::zeros(m.cols, m.rows);
     for r in 0..m.rows {
-        for c in 0..m.cols {
-            result.set(c, r, m.get(r, c));
-        }
+        for c in 0..m.cols { res.set(c, r, m.get(r, c)); }
     }
-    result
+    res
 }
 
 fn apply_binop(op: BinOp, l: &Value, r: &Value) -> Result<Value, String> {
@@ -66,76 +50,92 @@ fn apply_binop(op: BinOp, l: &Value, r: &Value) -> Result<Value, String> {
         BinOp::Add => elementwise(l, r, |a, b| Ok(a + b)),
         BinOp::Sub => elementwise(l, r, |a, b| Ok(a - b)),
         BinOp::EMul => elementwise(l, r, |a, b| Ok(a * b)),
-        BinOp::EDiv => elementwise(l, r, |a, b| {
-            if b == 0.0 { Err("Pembagian dengan nol".to_string()) } else { Ok(a / b) }
-        }),
+        BinOp::EDiv => elementwise(l, r, |a, b| if b == 0.0 { Err("Div 0".into()) } else { Ok(a / b) }),
         BinOp::EPow => elementwise(l, r, |a, b| Ok(a.powf(b))),
         BinOp::Mul => matrix_mul(l, r),
-        BinOp::Div => elementwise(l, r, |a, b| {
-            if b == 0.0 { Err("Pembagian dengan nol".to_string()) } else { Ok(a / b) }
-        }),
+        BinOp::Div => elementwise(l, r, |a, b| if b == 0.0 { Err("Div 0".into()) } else { Ok(a / b) }),
         BinOp::Pow => elementwise(l, r, |a, b| Ok(a.powf(b))),
+        
+        BinOp::Eq => elementwise(l, r, |a, b| Ok(if a == b { 1.0 } else { 0.0 })),
+        BinOp::Neq => elementwise(l, r, |a, b| Ok(if a != b { 1.0 } else { 0.0 })),
+        BinOp::Lt => elementwise(l, r, |a, b| Ok(if a < b { 1.0 } else { 0.0 })),
+        BinOp::Gt => elementwise(l, r, |a, b| Ok(if a > b { 1.0 } else { 0.0 })),
+        BinOp::Le => elementwise(l, r, |a, b| Ok(if a <= b { 1.0 } else { 0.0 })),
+        BinOp::Ge => elementwise(l, r, |a, b| Ok(if a >= b { 1.0 } else { 0.0 })),
     }
 }
 
 fn elementwise<F>(l: &Value, r: &Value, f: F) -> Result<Value, String>
-where F: Fn(f64, f64) -> Result<f64, String>,
-{
-    if let (Value::Scalar(a), Value::Scalar(b)) = (l, r) {
-        return f(*a, *b).map(Value::Scalar);
-    }
+where F: Fn(f64, f64) -> Result<f64, String> {
+    if let (Value::Scalar(a), Value::Scalar(b)) = (l, r) { return f(*a, *b).map(Value::Scalar); }
     if let (Value::Scalar(a), Value::Matrix(m)) = (l, r) {
-        let mut result = m.clone();
-        for v in result.data.iter_mut() { *v = f(*a, *v)?; }
-        return Ok(Value::Matrix(result));
+        let mut res = m.clone();
+        for v in res.data.iter_mut() { *v = f(*a, *v)?; }
+        return Ok(Value::Matrix(res));
     }
     if let (Value::Matrix(m), Value::Scalar(b)) = (l, r) {
-        let mut result = m.clone();
-        for v in result.data.iter_mut() { *v = f(*v, *b)?; }
-        return Ok(Value::Matrix(result));
+        let mut res = m.clone();
+        for v in res.data.iter_mut() { *v = f(*v, *b)?; }
+        return Ok(Value::Matrix(res));
     }
     let (lm, rm) = (l.as_matrix(), r.as_matrix());
-    if lm.rows != rm.rows || lm.cols != rm.cols {
-        return Err(format!("Dimensi tidak cocok: {}x{} vs {}x{}", lm.rows, lm.cols, rm.rows, rm.cols));
-    }
-    let mut result = Matrix::zeros(lm.rows, lm.cols);
-    for i in 0..lm.data.len() {
-        result.data[i] = f(lm.data[i], rm.data[i])?;
-    }
-    Ok(Value::Matrix(result))
+    if lm.rows != rm.rows || lm.cols != rm.cols { return Err("Dimensi tidak cocok".into()); }
+    let mut res = Matrix::zeros(lm.rows, lm.cols);
+    for i in 0..lm.data.len() { res.data[i] = f(lm.data[i], rm.data[i])?; }
+    Ok(Value::Matrix(res))
 }
 
 fn matrix_mul(l: &Value, r: &Value) -> Result<Value, String> {
     if let (Value::Matrix(a), Value::Matrix(b)) = (l, r) {
-        if a.cols != b.rows {
-            return Err(format!("Matrix multiplication tidak valid: {}x{} * {}x{}", a.rows, a.cols, b.rows, b.cols));
-        }
-        let mut result = Matrix::zeros(a.rows, b.cols);
+        if a.cols != b.rows { return Err("Matrix mul tidak valid".into()); }
+        let mut res = Matrix::zeros(a.rows, b.cols);
         for i in 0..a.rows {
             for j in 0..b.cols {
                 let mut sum = 0.0;
-                for k in 0..a.cols {
-                    sum += a.get(i, k) * b.get(k, j);
-                }
-                result.set(i, j, sum);
+                for k in 0..a.cols { sum += a.get(i, k) * b.get(k, j); }
+                res.set(i, j, sum);
             }
         }
-        return Ok(Value::Matrix(result));
+        return Ok(Value::Matrix(res));
     }
-    if let (Value::Scalar(a), Value::Scalar(b)) = (l, r) {
-        return Ok(Value::Scalar(a * b));
+    elementwise(l, r, |a, b| Ok(a * b))
+}
+
+pub fn exec_stmt(stmt: &Stmt, env: &mut Env) -> Result<(), String> {
+    match stmt {
+        Stmt::Expr(expr) => {
+            let val = eval(expr, env)?;
+            match &val {
+                Value::Scalar(n) => println!("ans = {}", n),
+                _ => println!("ans =\n{}", val),
+            }
+            Ok(())
+        }
+        Stmt::Assign { name, value } => {
+            let v = eval(value, env)?;
+            env.insert(name.clone(), v);
+            Ok(())
+        }
+        Stmt::For { var, iter, body } => {
+            let iter_val = eval(iter, env)?;
+            for val in iter_val.as_matrix().data {
+                env.insert(var.clone(), Value::Scalar(val));
+                for s in body { exec_stmt(s, env)?; }
+            }
+            Ok(())
+        }
+        Stmt::If { cond, then_body, else_body } => {
+            let cond_val = eval(cond, env)?;
+            let is_true = cond_val.as_scalar().unwrap_or(0.0) != 0.0;
+            
+            if is_true {
+                for s in then_body { exec_stmt(s, env)?; }
+            } else if let Some(eb) = else_body {
+                for s in eb { exec_stmt(s, env)?; }
+            }
+            Ok(())
+        }
     }
-    if let (Value::Scalar(s), Value::Matrix(m)) = (l, r) {
-        let mut result = m.clone();
-        for v in result.data.iter_mut() { *v *= s; }
-        return Ok(Value::Matrix(result));
-    }
-    if let (Value::Matrix(m), Value::Scalar(s)) = (l, r) {
-        let mut result = m.clone();
-        for v in result.data.iter_mut() { *v *= s; }
-        return Ok(Value::Matrix(result));
-    }
-    Err("Kombinasi tipe tidak valid untuk *".to_string())
 }
 
 fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
@@ -148,7 +148,6 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
         ("length", 1) => { let m = args[0].as_matrix(); Ok(Value::Scalar(m.data.len().max(m.rows).max(m.cols) as f64)) }
         ("size", 1) => { let m = args[0].as_matrix(); Ok(Value::Matrix(Matrix::new(1, 2, vec![m.rows as f64, m.cols as f64]))) }
         
-        // Fungsi Matematika Dasar
         ("sqrt", 1) => unary_fn("sqrt", &args[0], |x| x.sqrt()),
         ("abs", 1) => unary_fn("abs", &args[0], |x| x.abs()),
         ("sin", 1) => unary_fn("sin", &args[0], |x| x.sin()),
@@ -157,21 +156,14 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
         ("exp", 1) => unary_fn("exp", &args[0], |x| x.exp()),
         ("log", 1) => unary_fn("log", &args[0], |x| x.ln()),
 
-        // --- FITUR MILESTONE 2 (Signal & Statistik Dasar) ---
-        
         ("linspace", 3) => {
             let start = args[0].as_scalar().ok_or("linspace: start harus scalar")?;
             let end = args[1].as_scalar().ok_or("linspace: end harus scalar")?;
             let n = args[2].as_scalar().ok_or("linspace: n harus scalar")? as usize;
-            
-            if n < 2 {
-                return Ok(Value::Matrix(Matrix::new(1, 1, vec![start])));
-            }
+            if n < 2 { return Ok(Value::Matrix(Matrix::new(1, 1, vec![start]))); }
             let mut data = Vec::with_capacity(n);
             let step = (end - start) / (n as f64 - 1.0);
-            for i in 0..n {
-                data.push(start + step * i as f64);
-            }
+            for i in 0..n { data.push(start + step * i as f64); }
             Ok(Value::Matrix(Matrix::new(1, n, data)))
         }
         
@@ -199,11 +191,8 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             let vec_b = &b.data;
             let out_len = vec_a.len() + vec_b.len() - 1;
             let mut result = vec![0.0; out_len];
-            
             for i in 0..vec_a.len() {
-                for j in 0..vec_b.len() {
-                    result[i + j] += vec_a[i] * vec_b[j];
-                }
+                for j in 0..vec_b.len() { result[i + j] += vec_a[i] * vec_b[j]; }
             }
             Ok(Value::Matrix(Matrix::new(1, out_len, result)))
         }
@@ -220,51 +209,38 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             Ok(Value::Scalar(sum))
         }
 
-        // 5. FFT (Fast Fourier Transform)
         ("fft", 1) => {
             let m = args[0].as_matrix();
             let mut re: Vec<f64> = m.data.clone();
             let mut im: Vec<f64> = vec![0.0; re.len()];
             let n = re.len();
-
             if n == 0 || (n & (n - 1)) != 0 {
-                return Err("fft: panjang input harus kelipatan 2 (2, 4, 8, 16, dst)".to_string());
+                return Err("fft: panjang input harus kelipatan 2".to_string());
             }
-
             fft_recursive(&mut re, &mut im);
-
             let mut data = Vec::with_capacity(2 * n);
             data.extend_from_slice(&re);
             data.extend_from_slice(&im);
-
             Ok(Value::Matrix(Matrix::new(2, n, data)))
         }
 
-        // 6. IFFT (Inverse Fast Fourier Transform)
         ("ifft", 1) => {
             let m = args[0].as_matrix();
             if m.rows != 2 {
-                return Err("ifft: input harus matriks 2xN (baris 1 real, baris 2 imaginer)".to_string());
+                return Err("ifft: input harus matriks 2xN".to_string());
             }
             let n = m.cols;
             let mut re: Vec<f64> = m.data[0..n].to_vec();
             let mut im: Vec<f64> = m.data[n..2*n].to_vec();
-
-            for val in im.iter_mut() {
-                *val = -*val;
-            }
-
+            for val in im.iter_mut() { *val = -*val; }
             fft_recursive(&mut re, &mut im);
-
             for i in 0..n {
                 re[i] /= n as f64;
                 im[i] = -(im[i] / n as f64);
             }
-
             let mut data = Vec::with_capacity(2 * n);
             data.extend_from_slice(&re);
             data.extend_from_slice(&im);
-
             Ok(Value::Matrix(Matrix::new(2, n, data)))
         }
         
@@ -288,33 +264,26 @@ where F: Fn(f64) -> f64,
 fn fft_recursive(re: &mut [f64], im: &mut [f64]) {
     let n = re.len();
     if n <= 1 { return; }
-
     let mut re_even = vec![0.0; n / 2];
     let mut im_even = vec![0.0; n / 2];
     let mut re_odd = vec![0.0; n / 2];
     let mut im_odd = vec![0.0; n / 2];
-
     for i in 0..n / 2 {
         re_even[i] = re[2 * i];
         im_even[i] = im[2 * i];
         re_odd[i] = re[2 * i + 1];
         im_odd[i] = im[2 * i + 1];
     }
-
     fft_recursive(&mut re_even, &mut im_even);
     fft_recursive(&mut re_odd, &mut im_odd);
-
     for i in 0..n / 2 {
         let angle = -2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
         let wr = angle.cos();
         let wi = angle.sin();
-
         let tr = wr * re_odd[i] - wi * im_odd[i];
         let ti = wr * im_odd[i] + wi * re_odd[i];
-
         re[i] = re_even[i] + tr;
         im[i] = im_even[i] + ti;
-
         re[i + n / 2] = re_even[i] - tr;
         im[i + n / 2] = im_even[i] - ti;
     }

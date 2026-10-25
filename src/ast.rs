@@ -8,7 +8,7 @@ pub enum Expr {
         right: Box<Expr>,
     },
     MatrixLit {
-        rows: Vec<Vec<Expr>>,   // baris demi baris
+        rows: Vec<Vec<Expr>>,
     },
     Transpose(Box<Expr>),
     Call {
@@ -19,18 +19,22 @@ pub enum Expr {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
-    Add,
-    Sub,
-    Mul,       // matrix multiplication
-    Div,       // matrix division (right-div, nanti)
-    EMul,      // .*
-    EDiv,      // ./
-    EPow,      // .^
-    Pow,       // ^
+    Add, Sub, Mul, Div, EMul, EDiv, EPow, Pow,
+    Eq, Neq, Lt, Gt, Le, Ge,
 }
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Assign { name: String, value: Expr },
     Expr(Expr),
+    For {
+        var: String,
+        iter: Expr,
+        body: Vec<Stmt>,
+    },
+    If {
+        cond: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,
+    },
 }
