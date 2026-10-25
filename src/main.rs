@@ -87,7 +87,7 @@ fn run_cli() {
                     } else {
                         // PERBAIKAN: Siapkan buffer untuk menangkap output teks
                         let mut captured_output = String::new();
-                        if let Err(e) = exec_stmt(&stmt, &mut env, &mut captured_output) {
+                        if let Err(e) = exec_stmt(&stmt, &mut env, &mut captured_output, false) {
                             println!("Eval error: {}", e);
                         } else {
                             // Cetak teks (ans/disp) ke terminal

@@ -116,9 +116,6 @@ impl Parser {
                 self.advance(); self.advance();
                 let value = self.parse_range()?;
                 return Ok(Stmt::Assign { name, value });
-            } else {
-                self.advance();
-                return Ok(Stmt::Expr(Expr::Var(name)));
             }
         }
 
@@ -216,35 +213,25 @@ impl Parser {
             Token::String(s) => Ok(Expr::String(s)),
             Token::Identifier(name) => {
                 if self.peek() == &Token::LParen {
-                    // Kita harus membedakan antara fungsi sin(x) dan slicing x(1:5)
-                    // Kita simpan posisi sekarang, dan coba parse isi kurung
                     self.advance();
-                    if self.peek() == &Token::RParen {
-                        self.advance();
-                        return Ok(Expr::Call { name, args: vec![] });
-                    }
-                    
-                    let first_arg = self.parse_range()?;
-                    
-                    if self.peek() == &Token::RParen {
-                        self.advance();
-                        // Jika isinya adalah Range (menggunakan ':'), berarti ini SLICING
-                        if let Expr::Range { .. } = first_arg {
-                            return Ok(Expr::Index { target: Box::new(Expr::Var(name)), index: Box::new(first_arg) });
-                        } else {
-                            // Jika isinya angka biasa (misal: zeros(3)), berarti ini FUNCTION CALL
-                            return Ok(Expr::Call { name, args: vec![first_arg] });
+                    let mut args = Vec::new();
+                    if self.peek() != &Token::RParen {
+                        args.push(self.parse_range()?);
+                        while self.peek() == &Token::Comma {
+                            self.advance();
+                            args.push(self.parse_range()?);
                         }
                     }
-                    
-                    // Jika ada koma, berarti ini multi-argumen Function Call (misal: zeros(2, 3))
-                    let mut args = vec![first_arg];
-                    while self.peek() == &Token::Comma {
-                        self.advance();
-                        args.push(self.parse_range()?);
-                    }
                     match self.advance() {
-                        Token::RParen => Ok(Expr::Call { name, args }),
+                        Token::RParen => {
+                            // PERBAIKAN BUG 2: Cek apakah ini fungsi atau slicing array
+                            if args.len() == 1 {
+                                if let Expr::Range { .. } = args[0] {
+                                    return Ok(Expr::Index { target: Box::new(Expr::Var(name)), index: Box::new(args[0].clone()) });
+                                }
+                            }
+                            Ok(Expr::Call { name, args })
+                        }
                         t => Err(format!("Diharapkan ')', dapat {:?}", t)),
                     }
                 } else {

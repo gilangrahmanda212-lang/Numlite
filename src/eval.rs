@@ -133,7 +133,7 @@ fn matrix_mul(l: &Value, r: &Value) -> Result<Value, String> {
     elementwise(l, r, |a, b| Ok(a * b))
 }
 
-pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String) -> Result<(), String> {
+pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_loop: bool) -> Result<(), String> {
     match stmt {
         Stmt::Expr(Expr::Call { name, args }) if name == "run" => {
             if args.len() != 1 { return Err("run: butuh 1 argumen".to_string()); }
@@ -151,7 +151,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String) -> Res
 
             while !parser.is_at_eof() {
                 if let Ok(stmt) = parser.parse_stmt() {
-                    exec_stmt(&stmt, env, capture_output)?;
+                    exec_stmt(&stmt, env, capture_output, is_in_loop)?;
                 } else {
                     break; 
                 }
@@ -163,7 +163,6 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String) -> Res
             Ok(())
         }
         Stmt::Expr(expr) => {
-            // Cek apakah ini fungsi disp()
             if let Expr::Call { name, args } = expr {
                 if name == "disp" && args.len() == 1 {
                     let val = eval(&args[0], env)?;
@@ -185,10 +184,12 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String) -> Res
         }
         Stmt::Assign { name, value } => {
             let v = eval(value, env)?;
-            // Mencetak nama variabel dan nilainya
-            match &v {
-                Value::Scalar(n) => capture_output.push_str(&format!("{} =\n  {}\n", name, n)),
-                _ => capture_output.push_str(&format!("{} =\n{}\n", name, v)),
+            // PERBAIKAN BUG 3: Jangan cetak jika sedang di dalam loop
+            if !is_in_loop {
+                match &v {
+                    Value::Scalar(n) => capture_output.push_str(&format!("{} =\n  {}\n", name, n)),
+                    _ => capture_output.push_str(&format!("{} =\n{}\n", name, v)),
+                }
             }
             env.insert(name.clone(), v);
             Ok(())
@@ -197,7 +198,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String) -> Res
             let iter_val = eval(iter, env)?;
             for val in iter_val.as_matrix().data {
                 env.insert(var.clone(), Value::Scalar(val));
-                for s in body { exec_stmt(s, env, capture_output)?; }
+                for s in body { exec_stmt(s, env, capture_output, true)?; } // Set is_in_loop = true
             }
             Ok(())
         }
@@ -205,9 +206,9 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String) -> Res
             let cond_val = eval(cond, env)?;
             let is_true = cond_val.as_scalar().unwrap_or(0.0) != 0.0;
             if is_true {
-                for s in then_body { exec_stmt(s, env, capture_output)?; }
+                for s in then_body { exec_stmt(s, env, capture_output, is_in_loop)?; }
             } else if let Some(eb) = else_body {
-                for s in eb { exec_stmt(s, env, capture_output)?; }
+                for s in eb { exec_stmt(s, env, capture_output, is_in_loop)?; }
             }
             Ok(())
         }

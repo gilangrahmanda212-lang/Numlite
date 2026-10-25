@@ -62,12 +62,11 @@ impl Lexer {
             let token = match c {
                 '\n' => { self.advance(); Token::Newline }
                 '%' => {
-                    // Abaikan semua karakter sampai ujung baris
                     while let Some(ch) = self.peek() {
                         if ch == '\n' { break; }
                         self.advance();
                     }
-                    continue; // Langsung lanjut ke iterasi berikutnya
+                    continue; 
                 }
                 '0'..='9' => {
                     let n = self.read_number()?;
@@ -130,16 +129,25 @@ impl Lexer {
                 ':' => { self.advance(); Token::Colon }
                 '\'' => {
                     self.advance();
-                    let mut s = String::new();
-                    while let Some(ch) = self.peek() {
-                        if ch == '\'' {
+                    // PERBAIKAN BUG 1: Cek apakah ini String atau Transpose
+                    let is_string = if let Some(next) = self.peek() {
+                        next.is_alphanumeric() || next == ' '
+                    } else { false };
+
+                    if is_string {
+                        let mut s = String::new();
+                        while let Some(ch) = self.peek() {
+                            if ch == '\'' {
+                                self.advance();
+                                break;
+                            }
+                            s.push(ch);
                             self.advance();
-                            break;
                         }
-                        s.push(ch);
-                        self.advance();
+                        Token::String(s)
+                    } else {
+                        Token::Transpose
                     }
-                    Token::String(s)
                 }
                 '^' => { self.advance(); Token::Caret }
                 _ => return Err(format!("Karakter tidak dikenal: '{}'", c)),
