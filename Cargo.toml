@@ -8,6 +8,7 @@ crossterm = "0.27"
 rand = "0.8"
 eframe = "0.27"  # <-- Library GUI
 egui = "0.27"    # <-- Library GUI
+rfd = "0.14"
 gag = "1.0"  
 
 [profile.release]

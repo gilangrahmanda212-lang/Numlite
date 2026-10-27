@@ -17,6 +17,9 @@ fn calc_with_env(input: &str, env: &Env) -> Result<Value, String> {
     match stmt {
         Stmt::Expr(e) => eval(&e, env),
         Stmt::Assign { .. } => Err("bukan expression".to_string()),
+        Stmt::For { .. } | Stmt::If { .. } | Stmt::Plot { .. } => {
+            Err("bukan expression".to_string())
+        }
     }
 }
 
@@ -34,6 +37,7 @@ fn calc_matrix(input: &str) -> Result<Matrix, String> {
     match calc(input)? {
         Value::Matrix(m) => Ok(m),
         Value::Scalar(n) => Ok(Matrix::new(1, 1, vec![n])),
+        Value::Str(_) => Err("bukan matrix".to_string()),
     }
 }
 

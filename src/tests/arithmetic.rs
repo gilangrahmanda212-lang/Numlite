@@ -1,4 +1,4 @@
-cat > tests/arithmetic.rs << 'ENDOFFILE'
+//cat > tests/arithmetic.rs << 'ENDOFFILE'
 use numlite::ast::Stmt;
 use numlite::eval::{eval, Env};
 use numlite::lexer::Lexer;
@@ -39,7 +39,9 @@ fn calc_matrix(input: &str) -> Result<Matrix, String> {
 }
 
 #[test]
-fn test_add() { assert_eq!(calc_scalar("1 + 2").unwrap(), 3.0); }
+fn test_add() {
+    assert_eq!(calc_scalar("1 + 2").unwrap(), 3.0);
+}
 
 #[test]
 fn test_precedence() {
@@ -58,10 +60,14 @@ fn test_left_associative() {
 }
 
 #[test]
-fn test_float() { assert_eq!(calc_scalar("3.14 * 2").unwrap(), 6.28); }
+fn test_float() {
+    assert_eq!(calc_scalar("3.14 * 2").unwrap(), 6.28);
+}
 
 #[test]
-fn test_divide_by_zero() { assert!(calc_scalar("1 / 0").is_err()); }
+fn test_divide_by_zero() {
+    assert!(calc_scalar("1 / 0").is_err());
+}
 
 #[test]
 fn test_syntax_error() {
@@ -164,4 +170,5 @@ fn test_sqrt() {
 fn test_negative() {
     assert_eq!(calc_scalar("-5 + 10").unwrap(), 5.0);
 }
-ENDOFFILE
+
+//ENDOFFILE
