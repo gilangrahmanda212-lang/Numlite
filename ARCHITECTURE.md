@@ -75,6 +75,3 @@ If you find a bug (e.g., an error when typing a specific expression), please ope
 This project is licensed under the MIT License.
 ```
 
----
-
-Setelah Anda menyimpan ini, tautan biru `[ARCHITECTURE.md]` yang Anda tunjukkan di screenshot sebelumnya akan berfungsi dengan sempurna! 🚀
