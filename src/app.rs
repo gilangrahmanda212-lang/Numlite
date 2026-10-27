@@ -168,12 +168,16 @@ impl NumLiteApp {
     }
 
     fn draw_plot(&self, ui: &mut egui::Ui, plot: &PlotData, height: f32) {
-        let margin_left = 30.0;
-        let margin_bottom = 15.0;
+        // PERBAIKAN: Menambahkan margin_top agar teks atas tidak terpotong
+        let margin_left = 35.0; 
+        let margin_top = 15.0; 
+        let margin_bottom = 20.0;
+        
         let (response, painter) = ui.allocate_painter(egui::vec2(ui.available_width(), height), egui::Sense::hover());
         let full_rect = response.rect;
+        
         let rect = egui::Rect::from_min_max(
-            egui::pos2(full_rect.left() + margin_left, full_rect.top()),
+            egui::pos2(full_rect.left() + margin_left, full_rect.top() + margin_top),
             egui::pos2(full_rect.right(), full_rect.bottom() - margin_bottom)
         );
 
@@ -225,16 +229,14 @@ impl eframe::App for NumLiteApp {
         let bg_tab_inactive = Color32::from_rgb(15, 15, 15); 
         let bg_bar = Color32::from_rgb(20, 20, 20); 
         
-        // Margin header atas dibuat lebih seimbang (kiri, kanan, atas, bawah)
         let margin_header = egui::Margin { left: 10.0, right: 10.0, top: 10.0, bottom: 10.0 };
         let margin_konten = egui::Margin { left: 10.0, right: 10.0, top: 8.0, bottom: 8.0 };
 
-        // 1. TOP PANEL (Header)
+        // 1. TOP PANEL
         egui::TopBottomPanel::top("top_panel")
             .frame(egui::Frame::none().fill(bg_bar).inner_margin(margin_header))
             .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // Tombol Burger (ditambahkan add_sized agar tingginya seimbang dengan logo)
                 let burger_color = if self.menu_open { Color32::GREEN } else { Color32::LIGHT_GRAY };
                 let burger_btn = egui::Button::new(egui::RichText::new("☰").size(24.0).color(burger_color)).frame(false);
                 
@@ -315,7 +317,7 @@ impl eframe::App for NumLiteApp {
             });
         });
 
-        // 4. PANEL KANAN
+        // 4. PANEL KANAN (Figure)
         egui::SidePanel::right("plot_panel").resizable(true).default_width(400.0).show(ctx, |ui| {
             ui.heading("Figure");
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -345,7 +347,7 @@ impl eframe::App for NumLiteApp {
             if !is_open { self.popup_plot = None; }
         }
 
-        // 6. PANEL BAWAH
+        // 6. PANEL BAWAH (Console Output)
         egui::TopBottomPanel::bottom("bottom_panel")
             .resizable(true)
             .default_height(150.0)
@@ -368,7 +370,7 @@ impl eframe::App for NumLiteApp {
             });
         });
 
-        // 7. PANEL TENGAH
+        // 7. PANEL TENGAH (Editor)
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(bg_editor).inner_margin(margin_konten))
             .show(ctx, |ui| {
