@@ -21,7 +21,7 @@ With a binary size of under 10 MB, NumLite offers a modern, fast, and responsive
 
 ### GUI Mode (Desktop Application)
 Open a terminal, navigate to the project folder, and run:
-```bash
+```
 cargo run
 ```
 
