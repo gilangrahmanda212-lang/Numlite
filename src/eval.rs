@@ -41,8 +41,17 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
         Expr::Index { target, index } => {
             let target_val = eval(target, env)?;
             let mat = target_val.as_matrix();
-            let index_val = eval(index, env)?;
-            let idx_mat = index_val.as_matrix();
+            
+            // Tangani keyword 'end'
+            let idx_mat = if let Expr::Call { name, .. } = &**index {
+                if name == "get_end" {
+                    Matrix::new(1, 1, vec![mat.data.len() as f64]) // Panjang array
+                } else {
+                    eval(index, env)?.as_matrix()
+                }
+            } else {
+                eval(index, env)?.as_matrix()
+            };
 
             let mut result_data = Vec::new();
             for &idx in &idx_mat.data {
@@ -186,7 +195,11 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             let v = eval(value, env)?;
             if !is_in_loop {
                 match &v {
-                    Value::Scalar(n) => capture_output.push_str(&format!("{} =\n  {}\n", name, n)),
+                    // Jika Skalar, cetak menyamping: x = 5
+                    Value::Scalar(n) => capture_output.push_str(&format!("{} = {}\n", name, n)),
+                    // Jika Kompleks, cetak menyamping: z = 3 + 4i
+                    Value::Complex(_) => capture_output.push_str(&format!("{} = {}\n", name, v)),
+                    // Jika Matriks, cetak ke bawah agar rapi
                     _ => capture_output.push_str(&format!("{} =\n{}\n", name, v)),
                 }
             }
@@ -221,21 +234,119 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
         ("ones", 1) => { let n = args[0].as_scalar().ok_or("ones: argumen harus scalar")? as usize; Ok(Value::Matrix(Matrix::ones(n, n))) }
         ("ones", 2) => { let r = args[0].as_scalar().ok_or("ones: argumen harus scalar")? as usize; let c = args[1].as_scalar().ok_or("ones: argumen harus scalar")? as usize; Ok(Value::Matrix(Matrix::ones(r, c))) }
         ("eye", 1) => { let n = args[0].as_scalar().ok_or("eye: argumen harus scalar")? as usize; Ok(Value::Matrix(Matrix::eye(n))) }
+        ("horzcat", 2) => {
+            let a = args[0].as_matrix();
+            let b = args[1].as_matrix();
+            if a.rows != b.rows {
+                return Err("horzcat: jumlah baris harus sama".to_string());
+            }
+            let new_cols = a.cols + b.cols;
+            let mut data = Vec::with_capacity(a.rows * new_cols);
+            for r in 0..a.rows {
+                for c in 0..a.cols { data.push(a.get(r, c)); }
+                for c in 0..b.cols { data.push(b.get(r, c)); }
+            }
+            Ok(Value::Matrix(Matrix::new(a.rows, new_cols, data)))
+        }
+        ("diag", 1) => {
+            let m = args[0].as_matrix();
+            if m.rows == 1 || m.cols == 1 {
+                // Jika input vektor, buat matriks diagonal
+                let n = m.data.len();
+                let mut res = Matrix::zeros(n, n);
+                for i in 0..n { res.set(i, i, m.data[i]); }
+                Ok(Value::Matrix(res))
+            } else {
+                // Jika input matriks, ambil elemen diagonalnya
+                let n = m.rows.min(m.cols);
+                let mut data = Vec::with_capacity(n);
+                for i in 0..n { data.push(m.get(i, i)); }
+                Ok(Value::Matrix(Matrix::new(n, 1, data)))
+            }
+        }
+        ("repmat", 3) => {
+            let m = args[0].as_matrix();
+            let rep_r = args[1].as_scalar().ok_or("repmat: baris harus scalar")? as usize;
+            let rep_c = args[2].as_scalar().ok_or("repmat: kolom harus scalar")? as usize;
+            
+            let new_rows = m.rows * rep_r;
+            let new_cols = m.cols * rep_c;
+            let mut data = Vec::with_capacity(new_rows * new_cols);
+            
+            for _r in 0..rep_r {
+                for r in 0..m.rows {
+                    for _c in 0..rep_c {
+                        for c in 0..m.cols {
+                            data.push(m.get(r, c));
+                        }
+                    }
+                }
+            }
+            Ok(Value::Matrix(Matrix::new(new_rows, new_cols, data)))
+        }
+        ("vertcat", 2) => {
+            let a = args[0].as_matrix();
+            let b = args[1].as_matrix();
+            if a.cols != b.cols {
+                return Err("vertcat: jumlah kolom harus sama".to_string());
+            }
+            let mut data = a.data.clone();
+            data.extend_from_slice(&b.data);
+            Ok(Value::Matrix(Matrix::new(a.rows + b.rows, a.cols, data)))
+        }
+        ("reshape", 3) => {
+            let m = args[0].as_matrix();
+            let new_rows = args[1].as_scalar().ok_or("reshape: argumen baris harus scalar")? as usize;
+            let new_cols = args[2].as_scalar().ok_or("reshape: argumen kolom harus scalar")? as usize;
+            
+            if new_rows * new_cols != m.data.len() {
+                return Err(format!(
+                    "reshape: jumlah elemen ({}) tidak cocok dengan dimensi baru ({}x{} = {})",
+                    m.data.len(), new_rows, new_cols, new_rows * new_cols
+                ));
+            }
+            
+            // Matriks data kita sudah disimpan secara row-major (baris demi baris),
+            // jadi kita tinggal memindahkan vektor datanya langsung ke dimensi baru.
+            Ok(Value::Matrix(Matrix::new(new_rows, new_cols, m.data)))
+        }
         ("length", 1) => { let m = args[0].as_matrix(); Ok(Value::Scalar(m.data.len().max(m.rows).max(m.cols) as f64)) }
         ("size", 1) => { let m = args[0].as_matrix(); Ok(Value::Matrix(Matrix::new(1, 2, vec![m.rows as f64, m.cols as f64]))) }
-        
         ("inv", 1) => {
             let m = args[0].as_matrix();
             let result = invert_matrix(&m)?;
             Ok(Value::Matrix(result))
         }
+        ("det", 1) => {
+            let m = args[0].as_matrix();
+            if m.rows != m.cols { return Err("det: matriks harus persegi".to_string()); }
+            // Kita panggil fungsi determinant yang akan dibuat di bawah
+            Ok(Value::Scalar(determinant(&m)?))
+        }
+        ("trace", 1) => {
+            let m = args[0].as_matrix();
+            if m.rows != m.cols { return Err("trace: matriks harus persegi".to_string()); }
+            let mut sum = 0.0;
+            for i in 0..m.rows { sum += m.get(i, i); }
+            Ok(Value::Scalar(sum))
+        }
+        ("rank", 1) => {
+            let m = args[0].as_matrix();
+            Ok(Value::Scalar(matrix_rank(&m)))
+        }
+        ("eig", 1) => {
+            let m = args[0].as_matrix();
+            if m.rows != m.cols { return Err("eig: matriks harus persegi".to_string()); }
+            // Mengembalikan satu nilai eigen dominan (Power Iteration)
+            let dominant_eig = power_iteration(&m, 100)?;
+            Ok(Value::Scalar(dominant_eig))
+        }
 
-        // --- FITUR PEMBULATAN & MODULUS BARU ---
+        // --- FITUR PEMBULATAN & MODULUS ---
         ("round", 1) => unary_fn("round", &args[0], |x| x.round()),
         ("floor", 1) => unary_fn("floor", &args[0], |x| x.floor()),
         ("ceil", 1) => unary_fn("ceil", &args[0], |x| x.ceil()),
         ("mod", 2) => {
-            // Menggunakan rumus matematika standar MATLAB untuk mod (bisa menangani angka negatif)
             elementwise(&args[0], &args[1], |a, b| {
                 if b == 0.0 { 
                     Err("mod: pembagian dengan nol".into()) 
@@ -244,12 +355,63 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
                 }
             })
         }
+        
+        // --- FITUR BILANGAN KOMPLEKS ---
+        ("complex", 2) => {
+            let re = args[0].as_scalar().ok_or("complex: bagian riil harus scalar")?;
+            let im = args[1].as_scalar().ok_or("complex: bagian imajiner harus scalar")?;
+            Ok(Value::Complex(crate::value::Complex::new(re, im)))
+        }
+        ("real", 1) => {
+            if let Some(c) = args[0].as_complex() {
+                Ok(Value::Scalar(c.re))
+            } else {
+                Err("real: butuh bilangan kompleks".to_string())
+            }
+        }
+        ("imag", 1) => {
+            if let Some(c) = args[0].as_complex() {
+                Ok(Value::Scalar(c.im))
+            } else {
+                Err("imag: butuh bilangan kompleks".to_string())
+            }
+        }
+        ("conj", 1) => {
+            if let Some(c) = args[0].as_complex() {
+                Ok(Value::Complex(crate::value::Complex::new(c.re, -c.im)))
+            } else {
+                Err("conj: butuh bilangan kompleks".to_string())
+            }
+        }
+        ("abs", 1) => {
+            if let Some(c) = args[0].as_complex() {
+                Ok(Value::Scalar((c.re * c.re + c.im * c.im).sqrt()))
+            } else {
+                unary_fn("abs", &args[0], |x| x.abs())
+            }
+        }
+        ("angle", 1) => {
+            if let Some(c) = args[0].as_complex() {
+                Ok(Value::Scalar(c.im.atan2(c.re)))
+            } else {
+                Err("angle: butuh bilangan kompleks".to_string())
+            }
+        }
 
+        // --- FUNGSI MATEMATIKA UMUM ---
         ("sqrt", 1) => unary_fn("sqrt", &args[0], |x| x.sqrt()),
-        ("abs", 1) => unary_fn("abs", &args[0], |x| x.abs()),
         ("sin", 1) => unary_fn("sin", &args[0], |x| x.sin()),
         ("cos", 1) => unary_fn("cos", &args[0], |x| x.cos()),
         ("tan", 1) => unary_fn("tan", &args[0], |x| x.tan()),
+        // Fungsi Trigonometri Tambahan
+        ("asin", 1) => unary_fn("asin", &args[0], |x| x.asin()),
+        ("acos", 1) => unary_fn("acos", &args[0], |x| x.acos()),
+        ("atan", 1) => unary_fn("atan", &args[0], |x| x.atan()),
+        
+        // Fungsi Sign (Tanda)
+        ("sign", 1) => unary_fn("sign", &args[0], |x| {
+            if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }
+        }),
         ("exp", 1) => unary_fn("exp", &args[0], |x| x.exp()),
         ("log", 1) => unary_fn("log", &args[0], |x| x.ln()),
 
@@ -275,6 +437,19 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             let c = args[1].as_scalar().ok_or("rand: kolom harus scalar")? as usize;
             let mut data = Vec::with_capacity(r * c);
             for _ in 0..(r * c) { data.push(rand::random::<f64>()); }
+            Ok(Value::Matrix(Matrix::new(r, c, data)))
+        }
+        ("randn", 1) => {
+            let n = args[0].as_scalar().ok_or("randn: argumen harus scalar")? as usize;
+            let mut data = Vec::with_capacity(n * n);
+            for _ in 0..(n * n) { data.push(randn_scalar()); }
+            Ok(Value::Matrix(Matrix::new(n, n, data)))
+        }
+        ("randn", 2) => {
+            let r = args[0].as_scalar().ok_or("randn: baris harus scalar")? as usize;
+            let c = args[1].as_scalar().ok_or("randn: kolom harus scalar")? as usize;
+            let mut data = Vec::with_capacity(r * c);
+            for _ in 0..(r * c) { data.push(randn_scalar()); }
             Ok(Value::Matrix(Matrix::new(r, c, data)))
         }
 
@@ -382,6 +557,7 @@ where F: Fn(f64) -> f64,
             Ok(Value::Matrix(result))
         }
         Value::Str(_) => Err(format!("{}: tidak bisa memproses tipe String", name)),
+        _ => Err(format!("{}: tipe data tidak didukung", name)),
     }.map_err(|e: String| format!("{}: {}", name, e))
 }
 
@@ -468,4 +644,131 @@ fn invert_matrix(m: &Matrix) -> Result<Matrix, String> {
         }
     }
     Ok(inv)
+}
+
+fn randn_scalar() -> f64 {
+    // Box-Muller Transform untuk menghasilkan distribusi normal standar (mean=0, std=1)
+    let u1: f64 = rand::random::<f64>().max(f64::EPSILON); // Hindari log(0)
+    let u2: f64 = rand::random::<f64>();
+    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+}
+
+fn determinant(m: &Matrix) -> Result<f64, String> {
+    let n = m.rows;
+    if n == 1 { return Ok(m.get(0, 0)); }
+    if n == 2 { return Ok(m.get(0, 0) * m.get(1, 1) - m.get(0, 1) * m.get(1, 0)); }
+
+    let mut temp = m.clone();
+    let mut det = 1.0;
+    
+    // Eliminasi Gauss
+    for i in 0..n {
+        let mut max_row = i;
+        for k in i + 1..n {
+            if temp.get(k, i).abs() > temp.get(max_row, i).abs() {
+                max_row = k;
+            }
+        }
+
+        if temp.get(max_row, i).abs() < 1e-12 {
+            return Ok(0.0); // Matriks singular, determinan 0
+        }
+
+        if i != max_row {
+            for j in 0..n {
+                let tmp = temp.get(i, j);
+                temp.set(i, j, temp.get(max_row, j));
+                temp.set(max_row, j, tmp);
+            }
+            det = -det; // Tukar baris mengubah tanda determinan
+        }
+
+        let pivot = temp.get(i, i);
+        det *= pivot;
+
+        for k in i + 1..n {
+            let factor = temp.get(k, i) / pivot;
+            for j in i..n {
+                temp.set(k, j, temp.get(k, j) - factor * temp.get(i, j));
+            }
+        }
+    }
+    Ok(det)
+}
+fn matrix_rank(m: &Matrix) -> f64 {
+    let mut temp = m.clone();
+    let mut rank = 0;
+    let rows = temp.rows;
+    let cols = temp.cols;
+    let mut row = 0;
+
+    for col in 0..cols {
+        if row >= rows { break; }
+        
+        // Cari pivot
+        let mut max_row = row;
+        for k in row + 1..rows {
+            if temp.get(k, col).abs() > temp.get(max_row, col).abs() {
+                max_row = k;
+            }
+        }
+
+        if temp.get(max_row, col).abs() > 1e-9 {
+            if row != max_row {
+                for j in 0..cols {
+                    let tmp = temp.get(row, j);
+                    temp.set(row, j, temp.get(max_row, j));
+                    temp.set(max_row, j, tmp);
+                }
+            }
+            
+            let pivot = temp.get(row, col);
+            for k in row + 1..rows {
+                let factor = temp.get(k, col) / pivot;
+                for j in col..cols {
+                    temp.set(k, j, temp.get(k, j) - factor * temp.get(row, j));
+                }
+            }
+            rank += 1;
+            row += 1;
+        }
+    }
+    rank as f64
+}
+
+fn power_iteration(m: &Matrix, max_iter: usize) -> Result<f64, String> {
+    let n = m.rows;
+    let mut v = vec![1.0; n]; // Tebakan awal vektor eigen
+    let mut eigenvalue = 0.0;
+
+    for _ in 0..max_iter {
+        let mut new_v = vec![0.0; n];
+        for i in 0..n {
+            for j in 0..n {
+                new_v[i] += m.get(i, j) * v[j];
+            }
+        }
+
+        // Cari magnitudo terbesar untuk normalisasi
+        let mut max_val = 0.0;
+        for &val in &new_v {
+            if val.abs() > max_val { max_val = val.abs(); }
+        }
+        
+        if max_val < 1e-12 { break; } // Matriks nol
+        
+        for i in 0..n { new_v[i] /= max_val; }
+        
+        // Perkiraan eigenvalue (Rasio Rayleigh)
+        let mut dot_new_v = 0.0;
+        let mut dot_v = 0.0;
+        for i in 0..n {
+            dot_new_v += new_v[i] * v[i];
+            dot_v += v[i] * v[i];
+        }
+        
+        eigenvalue = dot_new_v / dot_v;
+        v = new_v;
+    }
+    Ok(eigenvalue)
 }

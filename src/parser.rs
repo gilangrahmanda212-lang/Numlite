@@ -200,9 +200,14 @@ impl Parser {
 
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_factor()?;
-        while self.peek() == &Token::Transpose {
-            self.advance();
-            expr = Expr::Transpose(Box::new(expr));
+        // MENANGANI TRANSPOSE YANG TERBACA SEBAGAI STRING KOSONG
+        while let Token::String(s) = self.peek() {
+            if s.is_empty() {
+                self.advance();
+                expr = Expr::Transpose(Box::new(expr));
+            } else {
+                break;
+            }
         }
         Ok(expr)
     }
@@ -210,7 +215,13 @@ impl Parser {
     fn parse_factor(&mut self) -> Result<Expr, String> {
         match self.advance() {
             Token::Number(n) => Ok(Expr::Number(n)),
-            Token::String(s) => Ok(Expr::String(s)),
+            Token::String(s) => {
+                if s.is_empty() {
+                    Ok(Expr::Var("end".to_string())) // Fallback jika di awal
+                } else {
+                    Ok(Expr::String(s))
+                }
+            },
             Token::Identifier(name) => {
                 if self.peek() == &Token::LParen {
                     self.advance();
@@ -224,8 +235,15 @@ impl Parser {
                     }
                     match self.advance() {
                         Token::RParen => {
-                            // PERBAIKAN BUG 2: Cek apakah ini fungsi atau slicing array
                             if args.len() == 1 {
+                                if let Expr::Var(ref v) = args[0] {
+                                    if v == "end" {
+                                        return Ok(Expr::Index { 
+                                            target: Box::new(Expr::Var(name)), 
+                                            index: Box::new(Expr::Call { name: "get_end".to_string(), args: vec![] }) 
+                                        });
+                                    }
+                                }
                                 if let Expr::Range { .. } = args[0] {
                                     return Ok(Expr::Index { target: Box::new(Expr::Var(name)), index: Box::new(args[0].clone()) });
                                 }
@@ -246,6 +264,7 @@ impl Parser {
                 }
             }
             Token::LBracket => self.parse_matrix_lit(),
+            Token::Transpose => Ok(Expr::String("".to_string())), // Fallback
             t => Err(format!("Token tidak terduga: {:?}", t)),
         }
     }
@@ -253,21 +272,67 @@ impl Parser {
     fn parse_matrix_lit(&mut self) -> Result<Expr, String> {
         let mut rows: Vec<Vec<Expr>> = Vec::new();
         let mut current_row: Vec<Expr> = Vec::new();
+        
         if self.peek() == &Token::RBracket {
             self.advance();
             return Ok(Expr::MatrixLit { rows: Vec::new() });
         }
+
         loop {
             let expr = self.parse_range()?;
             current_row.push(expr);
+
             match self.peek() {
                 Token::Comma => { self.advance(); }
-                Token::Semicolon => { self.advance(); rows.push(current_row); current_row = Vec::new(); }
-                Token::RBracket => { self.advance(); rows.push(current_row); break; }
-                Token::Newline => { self.advance(); rows.push(current_row); current_row = Vec::new(); }
+                Token::Semicolon => { 
+                    self.advance(); 
+                    rows.push(current_row); 
+                    current_row = Vec::new(); 
+                }
+                Token::RBracket => { 
+                    self.advance(); 
+                    rows.push(current_row); 
+                    break; 
+                }
+                Token::Newline => { 
+                    self.advance(); 
+                    rows.push(current_row); 
+                    current_row = Vec::new(); 
+                }
                 t => return Err(format!("Diharapkan ',', ';', atau ']', dapat {:?}", t)),
             }
         }
+
+        let is_concat = rows.iter().any(|row| row.iter().any(|e| matches!(e, Expr::Var(_) | Expr::Call { .. })));
+        
+        if is_concat {
+            let mut row_exprs = Vec::new();
+            for row in rows {
+                if row.is_empty() { continue; }
+                let mut current_expr = row[0].clone();
+                for i in 1..row.len() {
+                    current_expr = Expr::Call {
+                        name: "horzcat".to_string(),
+                        args: vec![current_expr, row[i].clone()],
+                    };
+                }
+                row_exprs.push(current_expr);
+            }
+
+            if row_exprs.is_empty() {
+                return Ok(Expr::MatrixLit { rows: Vec::new() });
+            }
+
+            let mut final_expr = row_exprs[0].clone();
+            for i in 1..row_exprs.len() {
+                final_expr = Expr::Call {
+                    name: "vertcat".to_string(),
+                    args: vec![final_expr, row_exprs[i].clone()],
+                };
+            }
+            return Ok(final_expr);
+        }
+
         let cols = rows[0].len();
         for row in &rows {
             if row.len() != cols { return Err("Jumlah kolom tidak sama".to_string()); }

@@ -4,7 +4,20 @@ use std::fmt;
 pub enum Value {
     Scalar(f64),
     Matrix(Matrix),
-    Str(String), // <-- BARU
+    Complex(Complex), // <-- BARU
+    Str(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Complex {
+    pub re: f64,
+    pub im: f64,
+}
+
+impl Complex {
+    pub fn new(re: f64, im: f64) -> Self {
+        Complex { re, im }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,10 +56,18 @@ impl Value {
             _ => None,
         }
     }
+    pub fn as_complex(&self) -> Option<Complex> {
+        match self {
+            Value::Scalar(n) => Some(Complex::new(*n, 0.0)),
+            Value::Complex(c) => Some(c.clone()),
+            _ => None,
+        }
+    }
     pub fn as_matrix(&self) -> Matrix {
         match self {
             Value::Scalar(n) => Matrix::new(1, 1, vec![*n]),
             Value::Matrix(m) => m.clone(),
+            Value::Complex(c) => Matrix::new(1, 1, vec![c.re]), // Fallback
             Value::Str(_) => Matrix::new(0, 0, vec![]),
         }
     }
@@ -61,10 +82,24 @@ fn format_scalar(n: f64) -> String {
     }
 }
 
+fn format_complex(c: &Complex) -> String {
+    let re_str = format_scalar(c.re);
+    let im_str = format_scalar(c.im.abs());
+    
+    if c.im == 0.0 {
+        re_str
+    } else if c.re == 0.0 {
+        if c.im > 0.0 { format!("{}i", im_str) } else { format!("-{}i", im_str) }
+    } else {
+        if c.im > 0.0 { format!("{} + {}i", re_str, im_str) } else { format!("{} - {}i", re_str, im_str) }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Value::Scalar(n) => write!(f, "{}", format_scalar(*n)),
+            Value::Complex(c) => write!(f, "{}", format_complex(c)), // <-- Menampilkan format a + bi
             Value::Str(s) => write!(f, "\"{}\"", s),
             Value::Matrix(m) => {
                 if m.is_scalar() { return write!(f, "{}", format_scalar(m.data[0])); }

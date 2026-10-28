@@ -6,6 +6,7 @@ use numlite::ast::Stmt;
 use numlite::eval::{exec_stmt, Env};
 use numlite::lexer::Lexer;
 use numlite::parser::Parser;
+use numlite::value::Value;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,6 +39,8 @@ fn run_cli() {
     println!("Ketik 'exit' untuk keluar.\n");
 
     let mut env: Env = Env::new();
+    // Daftarkan konstanta pi
+    env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
 
     loop {
         let mut input = String::new();
@@ -79,13 +82,13 @@ fn run_cli() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
                     if let Stmt::Plot { title, x, y } = stmt {
-                        let x_val = numlite::eval::eval(&x, &env).unwrap_or(numlite::value::Value::Scalar(0.0)).as_matrix();
-                        let y_val = numlite::eval::eval(&y, &env).unwrap_or(numlite::value::Value::Scalar(0.0)).as_matrix();
+                        let x_val = numlite::eval::eval(&x, &env).unwrap_or(Value::Scalar(0.0)).as_matrix();
+                        let y_val = numlite::eval::eval(&y, &env).unwrap_or(Value::Scalar(0.0)).as_matrix();
                         // Di CLI, kita hanya mencatat grafik diabaikan
                         let _ = (title, x_val.data, y_val.data);
                         println!("[Grafik diabaikan di Mode CLI]");
                     } else {
-                        // PERBAIKAN: Siapkan buffer untuk menangkap output teks
+                        // Siapkan buffer untuk menangkap output teks
                         let mut captured_output = String::new();
                         if let Err(e) = exec_stmt(&stmt, &mut env, &mut captured_output, false) {
                             println!("Eval error: {}", e);

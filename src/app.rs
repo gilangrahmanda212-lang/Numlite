@@ -27,6 +27,7 @@ pub struct NumLiteApp {
 
 impl Default for NumLiteApp {
     fn default() -> Self {
+        // Buat Env kosong, nanti diisi di new()
         Self {
             tabs: vec![CodeTab {
                 name: "unsaved-code-1".to_string(),
@@ -51,7 +52,10 @@ impl NumLiteApp {
         visuals.window_fill = Color32::from_rgb(30, 30, 30);
         _cc.egui_ctx.set_visuals(visuals);
         
-        Self::default()
+        let mut app = Self::default();
+        // DAFTARKAN KONSTANTA PI DI SINI
+        app.env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
+        app
     }
 
     fn get_next_unsaved_name(&self) -> String {
@@ -140,6 +144,11 @@ impl NumLiteApp {
         let mut parser = Parser::new(tokens);
         let mut captured_output = String::new();
 
+        // Pastikan 'pi' selalu ada setiap kali Run diklik
+        if !self.env.contains_key("pi") {
+            self.env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
+        }
+
         while !parser.is_at_eof() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
@@ -168,7 +177,6 @@ impl NumLiteApp {
     }
 
     fn draw_plot(&self, ui: &mut egui::Ui, plot: &PlotData, height: f32) {
-        // PERBAIKAN: Menambahkan margin_top agar teks atas tidak terpotong
         let margin_left = 35.0; 
         let margin_top = 15.0; 
         let margin_bottom = 20.0;
