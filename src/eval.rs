@@ -184,7 +184,6 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
         }
         Stmt::Assign { name, value } => {
             let v = eval(value, env)?;
-            // PERBAIKAN BUG 3: Jangan cetak jika sedang di dalam loop
             if !is_in_loop {
                 match &v {
                     Value::Scalar(n) => capture_output.push_str(&format!("{} =\n  {}\n", name, n)),
@@ -198,7 +197,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             let iter_val = eval(iter, env)?;
             for val in iter_val.as_matrix().data {
                 env.insert(var.clone(), Value::Scalar(val));
-                for s in body { exec_stmt(s, env, capture_output, true)?; } // Set is_in_loop = true
+                for s in body { exec_stmt(s, env, capture_output, true)?; }
             }
             Ok(())
         }
@@ -225,6 +224,27 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
         ("length", 1) => { let m = args[0].as_matrix(); Ok(Value::Scalar(m.data.len().max(m.rows).max(m.cols) as f64)) }
         ("size", 1) => { let m = args[0].as_matrix(); Ok(Value::Matrix(Matrix::new(1, 2, vec![m.rows as f64, m.cols as f64]))) }
         
+        ("inv", 1) => {
+            let m = args[0].as_matrix();
+            let result = invert_matrix(&m)?;
+            Ok(Value::Matrix(result))
+        }
+
+        // --- FITUR PEMBULATAN & MODULUS BARU ---
+        ("round", 1) => unary_fn("round", &args[0], |x| x.round()),
+        ("floor", 1) => unary_fn("floor", &args[0], |x| x.floor()),
+        ("ceil", 1) => unary_fn("ceil", &args[0], |x| x.ceil()),
+        ("mod", 2) => {
+            // Menggunakan rumus matematika standar MATLAB untuk mod (bisa menangani angka negatif)
+            elementwise(&args[0], &args[1], |a, b| {
+                if b == 0.0 { 
+                    Err("mod: pembagian dengan nol".into()) 
+                } else { 
+                    Ok(a - b * (a / b).floor()) 
+                }
+            })
+        }
+
         ("sqrt", 1) => unary_fn("sqrt", &args[0], |x| x.sqrt()),
         ("abs", 1) => unary_fn("abs", &args[0], |x| x.abs()),
         ("sin", 1) => unary_fn("sin", &args[0], |x| x.sin()),
@@ -391,4 +411,61 @@ fn fft_recursive(re: &mut [f64], im: &mut [f64]) {
         re[i + n / 2] = re_even[i] - tr;
         im[i + n / 2] = im_even[i] - ti;
     }
+}
+
+fn invert_matrix(m: &Matrix) -> Result<Matrix, String> {
+    if m.rows != m.cols {
+        return Err("inv: matriks harus persegi".to_string());
+    }
+    let n = m.rows;
+    let mut aug = Matrix::zeros(n, n * 2);
+    for r in 0..n {
+        for c in 0..n {
+            aug.set(r, c, m.get(r, c));
+            aug.set(r, c + n, if r == c { 1.0 } else { 0.0 });
+        }
+    }
+
+    for i in 0..n {
+        let mut max_row = i;
+        for k in i + 1..n {
+            if aug.get(k, i).abs() > aug.get(max_row, i).abs() {
+                max_row = k;
+            }
+        }
+
+        if aug.get(max_row, i).abs() < 1e-9 {
+            return Err("inv: matriks singular (tidak punya invers)".to_string());
+        }
+
+        if i != max_row {
+            for j in 0..(n * 2) {
+                let tmp = aug.get(i, j);
+                aug.set(i, j, aug.get(max_row, j));
+                aug.set(max_row, j, tmp);
+            }
+        }
+
+        let pivot = aug.get(i, i);
+        for j in 0..(n * 2) {
+            aug.set(i, j, aug.get(i, j) / pivot);
+        }
+
+        for k in 0..n {
+            if k != i {
+                let factor = aug.get(k, i);
+                for j in 0..(n * 2) {
+                    aug.set(k, j, aug.get(k, j) - factor * aug.get(i, j));
+                }
+            }
+        }
+    }
+
+    let mut inv = Matrix::zeros(n, n);
+    for r in 0..n {
+        for c in 0..n {
+            inv.set(r, c, aug.get(r, c + n));
+        }
+    }
+    Ok(inv)
 }
