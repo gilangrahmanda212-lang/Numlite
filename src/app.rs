@@ -7,6 +7,7 @@ use crate::gui::PlotData;
 use egui::{Color32, Rounding};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 
 pub struct CodeTab {
     pub name: String,
@@ -22,11 +23,19 @@ pub struct NumLiteApp {
     env: Env,
     plots: Vec<PlotData>,
     popup_plot: Option<usize>,
-    menu_open: bool, 
+    menu_open: bool,
+    // Field untuk dialog async
+    open_tx: Sender<Option<PathBuf>>,
+    open_rx: Receiver<Option<PathBuf>>,
+    save_tx: Sender<Option<PathBuf>>,
+    save_rx: Receiver<Option<PathBuf>>,
+    dialog_active: bool,
 }
 
 impl Default for NumLiteApp {
     fn default() -> Self {
+        let (open_tx, open_rx) = channel();
+        let (save_tx, save_rx) = channel();
         Self {
             tabs: vec![CodeTab {
                 name: "unsaved-code-1".to_string(),
@@ -40,6 +49,11 @@ impl Default for NumLiteApp {
             plots: Vec::new(),
             popup_plot: None,
             menu_open: false,
+            open_tx,
+            open_rx,
+            save_tx,
+            save_rx,
+            dialog_active: false,
         }
     }
 }
@@ -47,11 +61,14 @@ impl Default for NumLiteApp {
 impl NumLiteApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(25, 25, 25); 
+        visuals.panel_fill = Color32::from_rgb(25, 25, 25);
         visuals.window_fill = Color32::from_rgb(30, 30, 30);
         _cc.egui_ctx.set_visuals(visuals);
-        
-        Self::default()
+
+        let mut app = Self::default();
+        // DAFTARKAN KONSTANTA PI DI SINI (fitur asli Anda dipertahankan)
+        app.env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
+        app
     }
 
     fn get_next_unsaved_name(&self) -> String {
@@ -76,50 +93,71 @@ impl NumLiteApp {
         self.active_tab = self.tabs.len() - 1;
     }
 
-    fn save_file(&mut self) {
-        if self.tabs.is_empty() { return; }
-        let tab = &mut self.tabs[self.active_tab];
+    // --- DIALOG ASYNC DENGAN THREAD TERPISAH ---
+    fn spawn_open_dialog(&mut self) {
+        if self.dialog_active { return; }
+        self.dialog_active = true;
+        let tx = self.open_tx.clone();
+        std::thread::spawn(move || {
+            let result = crate::file_dialog::open_file_dialog();
+            let _ = tx.send(result);
+        });
+    }
 
-        if tab.is_saved {
-            if let Some(path) = &tab.file_path {
-                let _ = fs::write(path, &tab.code);
-            }
-        } else {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("MATLAB Script", &["m"])
-                .set_file_name("script.m")
-                .save_file() 
-            {
-                let _ = fs::write(&path, &tab.code);
-                tab.file_path = Some(path.clone());
-                if let Some(stem) = path.file_stem() {
-                    tab.name = stem.to_string_lossy().to_string();
+    fn spawn_save_dialog(&mut self) {
+        if self.dialog_active { return; }
+        self.dialog_active = true;
+        let tx = self.save_tx.clone();
+        std::thread::spawn(move || {
+            let result = crate::file_dialog::save_file_dialog();
+            let _ = tx.send(result);
+        });
+    }
+
+    fn handle_open_result(&mut self) {
+        match self.open_rx.try_recv() {
+            Ok(Some(path)) => {
+                self.dialog_active = false;
+                if let Ok(content) = fs::read_to_string(&path) {
+                    let mut name = String::from("unknown");
+                    if let Some(stem) = path.file_stem() {
+                        name = stem.to_string_lossy().to_string();
+                    }
+                    self.tabs.push(CodeTab {
+                        name,
+                        code: content,
+                        is_saved: true,
+                        file_path: Some(path),
+                    });
+                    self.active_tab = self.tabs.len() - 1;
+                    self.menu_open = false;
                 }
-                tab.is_saved = true;
             }
+            Ok(None) => { self.dialog_active = false; }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => { self.dialog_active = false; }
         }
     }
 
-    fn open_file(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("MATLAB Script", &["m"])
-            .pick_file() 
-        {
-            if let Ok(content) = fs::read_to_string(&path) {
-                let mut name = String::from("unknown");
-                if let Some(stem) = path.file_stem() {
-                    name = stem.to_string_lossy().to_string();
+    fn handle_save_result(&mut self) {
+        match self.save_rx.try_recv() {
+            Ok(Some(path)) => {
+                self.dialog_active = false;
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    if let Err(e) = fs::write(&path, &tab.code) {
+                        self.output = format!("Gagal menyimpan: {}\n", e);
+                    } else {
+                        tab.file_path = Some(path.clone());
+                        if let Some(stem) = path.file_stem() {
+                            tab.name = stem.to_string_lossy().to_string();
+                        }
+                        tab.is_saved = true;
+                    }
                 }
-                
-                self.tabs.push(CodeTab {
-                    name,
-                    code: content,
-                    is_saved: true,
-                    file_path: Some(path),
-                });
-                self.active_tab = self.tabs.len() - 1;
-                self.menu_open = false; 
             }
+            Ok(None) => { self.dialog_active = false; }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => { self.dialog_active = false; }
         }
     }
 
@@ -139,6 +177,11 @@ impl NumLiteApp {
 
         let mut parser = Parser::new(tokens);
         let mut captured_output = String::new();
+
+        // Pastikan 'pi' selalu ada setiap kali Run diklik (fitur asli Anda)
+        if !self.env.contains_key("pi") {
+            self.env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
+        }
 
         while !parser.is_at_eof() {
             match parser.parse_stmt() {
@@ -168,9 +211,9 @@ impl NumLiteApp {
     }
 
     fn draw_plot(&self, ui: &mut egui::Ui, plot: &PlotData, height: f32) {
-        // PERBAIKAN: Menambahkan margin_top agar teks atas tidak terpotong
-        let margin_left = 35.0; 
-        let margin_top = 15.0; 
+        // Fitur asli Anda dipertahankan 100%
+        let margin_left = 35.0;
+        let margin_top = 15.0;
         let margin_bottom = 20.0;
         
         let (response, painter) = ui.allocate_painter(egui::vec2(ui.available_width(), height), egui::Sense::hover());
@@ -225,9 +268,10 @@ impl NumLiteApp {
 
 impl eframe::App for NumLiteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let bg_editor = Color32::from_rgb(30, 30, 30); 
-        let bg_tab_inactive = Color32::from_rgb(15, 15, 15); 
-        let bg_bar = Color32::from_rgb(20, 20, 20); 
+        // UI asli Anda dipertahankan 100%
+        let bg_editor = Color32::from_rgb(30, 30, 30);
+        let bg_tab_inactive = Color32::from_rgb(15, 15, 15);
+        let bg_bar = Color32::from_rgb(20, 20, 20);
         
         let margin_header = egui::Margin { left: 10.0, right: 10.0, top: 10.0, bottom: 10.0 };
         let margin_konten = egui::Margin { left: 10.0, right: 10.0, top: 8.0, bottom: 8.0 };
@@ -274,7 +318,8 @@ impl eframe::App for NumLiteApp {
                     }
                     ui.add_space(8.0); 
                     if ui.add_sized([210.0, 40.0], egui::Button::new(text_style("📂  Open File")).rounding(btn_rounding)).clicked() {
-                        self.open_file();
+                        // Ubah: panggil spawn_open_dialog
+                        self.spawn_open_dialog();
                     }
                 });
         }
@@ -381,7 +426,8 @@ impl eframe::App for NumLiteApp {
                         self.run_code();
                     }
                     if ui.add_sized([90.0, 30.0], egui::Button::new("💾 Save")).clicked() {
-                        self.save_file();
+                        // Ubah: panggil spawn_save_dialog
+                        self.spawn_save_dialog();
                     }
                 });
             });
@@ -398,5 +444,9 @@ impl eframe::App for NumLiteApp {
                 });
             }
         });
+
+        // --- 8. PROSES HASIL DIALOG (Non-blocking) ---
+        self.handle_open_result();
+        self.handle_save_result();
     }
 }

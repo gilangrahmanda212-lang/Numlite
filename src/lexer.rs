@@ -127,29 +127,30 @@ impl Lexer {
                 ',' => { self.advance(); Token::Comma }
                 ';' => { self.advance(); Token::Semicolon }
                 ':' => { self.advance(); Token::Colon }
+                
                 '\'' => {
                     self.advance();
-                    // PERBAIKAN BUG 1: Cek apakah ini String atau Transpose
-                    let is_string = if let Some(next) = self.peek() {
-                        next.is_alphanumeric() || next == ' '
-                    } else { false };
-
-                    if is_string {
-                        let mut s = String::new();
-                        while let Some(ch) = self.peek() {
-                            if ch == '\'' {
-                                self.advance();
-                                break;
-                            }
-                            s.push(ch);
+                    // SELALU ANGGAP INI STRING SAMPAI KUTIP PENUTUP
+                    // (Kita akan menangani Transpose di Parser)
+                    let mut s = String::new();
+                    while let Some(ch) = self.peek() {
+                        if ch == '\'' {
                             self.advance();
+                            break;
                         }
-                        Token::String(s)
-                    } else {
-                        Token::Transpose
+                        s.push(ch);
+                        self.advance();
                     }
+                    Token::String(s)
                 }
+                
                 '^' => { self.advance(); Token::Caret }
+                
+                '&' => {
+                    self.advance();
+                    continue;
+                }
+                
                 _ => return Err(format!("Karakter tidak dikenal: '{}'", c)),
             };
             tokens.push(token);
