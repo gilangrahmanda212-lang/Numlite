@@ -20,10 +20,17 @@ fn main() {
 }
 
 fn run_gui() {
+    // Muat ikon dari file PNG yang ada di folder utama proyek
+    // Jika Anda belum punya icon.png, hapus 3 baris ini dan .with_icon(icon) di bawah
+    let icon = eframe::icon_data::from_png_bytes(
+        &include_bytes!("../icon.png")[..]
+    ).expect("Gagal memuat icon.png. Pastikan file icon.png ada di folder utama proyek!");
+
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])
-            .with_title("NumLite - MATLAB Ringan"),
+            .with_title("NumLite - MATLAB Ringan")
+            .with_icon(icon), // Pasang ikon di sini
         ..Default::default()
     };
     
@@ -80,16 +87,13 @@ fn run_cli() {
         while !parser.is_at_eof() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
-                    // PERBAIKAN DI SINI: Gunakan `..` untuk mengabaikan field lain
                     if let Stmt::Plot { .. } = stmt {
                         println!("[Grafik diabaikan di Mode CLI]");
                     } else {
-                        // Siapkan buffer untuk menangkap output teks
                         let mut captured_output = String::new();
                         if let Err(e) = exec_stmt(&stmt, &mut env, &mut captured_output, false) {
                             println!("Eval error: {}", e);
                         } else {
-                            // Cetak teks (ans/disp) ke terminal
                             print!("{}", captured_output);
                         }
                     }
