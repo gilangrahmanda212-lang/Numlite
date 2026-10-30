@@ -28,28 +28,21 @@ impl Parser {
         if self.peek() == &Token::Eof { return Err("Eof".to_string()); }
 
         if self.peek() == &Token::Function {
-            self.advance(); // buang 'function'
-            
-            // 1. Baca nama fungsi (atau nama variabel return)
+            self.advance();
             let mut name = match self.advance() {
                 Token::Identifier(n) => n,
                 _ => return Err("Diharapkan nama fungsi setelah 'function'".to_string()),
             };
-
-            // 2. Cek apakah ada sintaks 'y = ' (opsional)
             if self.peek() == &Token::Assign {
-                self.advance(); // buang '='
-                // Baca nama fungsi sebenarnya setelah '='
+                self.advance();
                 name = match self.advance() {
                     Token::Identifier(n) => n,
                     _ => return Err("Diharapkan nama fungsi setelah '='".to_string()),
                 };
             }
-
-            // 3. Baca parameter (jika ada)
             let mut params = Vec::new();
             if self.peek() == &Token::LParen {
-                self.advance(); // buang '('
+                self.advance();
                 if self.peek() != &Token::RParen {
                     loop {
                         match self.advance() {
@@ -61,10 +54,7 @@ impl Parser {
                 }
                 if self.advance() != Token::RParen { return Err("Diharapkan ')' setelah parameter".to_string()); }
             }
-
             self.skip_newlines();
-            
-            // 4. Baca isi fungsi sampai 'end'
             let mut body = Vec::new();
             loop {
                 self.skip_newlines();
@@ -72,7 +62,6 @@ impl Parser {
                 if self.peek() == &Token::Eof { return Err("Diharapkan 'end' untuk menutup fungsi".to_string()); }
                 body.push(self.parse_stmt()?);
             }
-            
             return Ok(Stmt::FunctionDef(crate::ast::FunctionDef { name, params, body }));
         }
 
@@ -358,6 +347,10 @@ impl Parser {
             }
             Token::LBracket => self.parse_matrix_lit(),
             Token::Transpose => Ok(Expr::String("".to_string())),
+            
+            // PERBAIKAN DI SINI:
+            Token::End => Ok(Expr::Var("end".to_string())),
+            
             t => Err(format!("Token tidak terduga: {:?}", t)),
         }
     }
