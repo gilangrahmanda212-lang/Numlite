@@ -27,6 +27,55 @@ impl Parser {
         self.skip_newlines();
         if self.peek() == &Token::Eof { return Err("Eof".to_string()); }
 
+        if self.peek() == &Token::Function {
+            self.advance(); // buang 'function'
+            
+            // 1. Baca nama fungsi (atau nama variabel return)
+            let mut name = match self.advance() {
+                Token::Identifier(n) => n,
+                _ => return Err("Diharapkan nama fungsi setelah 'function'".to_string()),
+            };
+
+            // 2. Cek apakah ada sintaks 'y = ' (opsional)
+            if self.peek() == &Token::Assign {
+                self.advance(); // buang '='
+                // Baca nama fungsi sebenarnya setelah '='
+                name = match self.advance() {
+                    Token::Identifier(n) => n,
+                    _ => return Err("Diharapkan nama fungsi setelah '='".to_string()),
+                };
+            }
+
+            // 3. Baca parameter (jika ada)
+            let mut params = Vec::new();
+            if self.peek() == &Token::LParen {
+                self.advance(); // buang '('
+                if self.peek() != &Token::RParen {
+                    loop {
+                        match self.advance() {
+                            Token::Identifier(p) => params.push(p),
+                            _ => return Err("Diharapkan nama parameter".to_string()),
+                        }
+                        if self.peek() == &Token::Comma { self.advance(); } else { break; }
+                    }
+                }
+                if self.advance() != Token::RParen { return Err("Diharapkan ')' setelah parameter".to_string()); }
+            }
+
+            self.skip_newlines();
+            
+            // 4. Baca isi fungsi sampai 'end'
+            let mut body = Vec::new();
+            loop {
+                self.skip_newlines();
+                if self.peek() == &Token::End { self.advance(); break; }
+                if self.peek() == &Token::Eof { return Err("Diharapkan 'end' untuk menutup fungsi".to_string()); }
+                body.push(self.parse_stmt()?);
+            }
+            
+            return Ok(Stmt::FunctionDef(crate::ast::FunctionDef { name, params, body }));
+        }
+
         if self.peek() == &Token::For {
             self.advance();
             let var = match self.advance() {
@@ -48,14 +97,26 @@ impl Parser {
             return Ok(Stmt::For { var, iter, body });
         }
 
+        if self.peek() == &Token::While {
+            self.advance();
+            let cond = self.parse_range()?;
+            self.skip_newlines();
+            let mut body = Vec::new();
+            loop {
+                self.skip_newlines();
+                if self.peek() == &Token::End { self.advance(); break; }
+                if self.peek() == &Token::Eof { return Err("Diharapkan 'end'".to_string()); }
+                body.push(self.parse_stmt()?);
+            }
+            return Ok(Stmt::While { cond, body });
+        }
+
         if self.peek() == &Token::If {
             self.advance();
             let cond = self.parse_range()?;
             self.skip_newlines();
-            
             let mut then_body = Vec::new();
             let mut else_body = None;
-
             loop {
                 self.skip_newlines();
                 if self.peek() == &Token::Else {
@@ -78,6 +139,48 @@ impl Parser {
             return Ok(Stmt::If { cond, then_body, else_body });
         }
 
+        if self.peek() == &Token::Switch {
+            self.advance();
+            let expr = self.parse_range()?;
+            self.skip_newlines();
+            let mut cases = Vec::new();
+            let mut otherwise = None;
+            loop {
+                self.skip_newlines();
+                if self.peek() == &Token::Case {
+                    self.advance();
+                    let case_expr = self.parse_range()?;
+                    self.skip_newlines();
+                    let mut body = Vec::new();
+                    loop {
+                        self.skip_newlines();
+                        if self.peek() == &Token::Case || self.peek() == &Token::Otherwise || self.peek() == &Token::End { break; }
+                        body.push(self.parse_stmt()?);
+                    }
+                    cases.push((case_expr, body));
+                } else if self.peek() == &Token::Otherwise {
+                    self.advance();
+                    self.skip_newlines();
+                    let mut body = Vec::new();
+                    loop {
+                        self.skip_newlines();
+                        if self.peek() == &Token::End { break; }
+                        body.push(self.parse_stmt()?);
+                    }
+                    otherwise = Some(body);
+                } else if self.peek() == &Token::End {
+                    self.advance();
+                    break;
+                } else {
+                    return Err("Diharapkan 'case', 'otherwise', atau 'end' di dalam switch".to_string());
+                }
+            }
+            return Ok(Stmt::Switch { expr, cases, otherwise });
+        }
+
+        if self.peek() == &Token::Break { self.advance(); return Ok(Stmt::Break); }
+        if self.peek() == &Token::Continue { self.advance(); return Ok(Stmt::Continue); }
+
         if let Token::Identifier(name) = self.peek().clone() {
             let next_tok = self.tokens.get(self.pos + 1);
             if next_tok == Some(&Token::LParen) {
@@ -94,9 +197,7 @@ impl Parser {
                     Token::RParen => {
                         match name.as_str() {
                             "title" => {
-                                if let Some(Expr::String(s)) = args.get(0) {
-                                    self.current_title = s.clone();
-                                }
+                                if let Some(Expr::String(s)) = args.get(0) { self.current_title = s.clone(); }
                                 return Ok(Stmt::Expr(Expr::Number(0.0)));
                             }
                             "plot" => {
@@ -200,7 +301,6 @@ impl Parser {
 
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_factor()?;
-        // MENANGANI TRANSPOSE YANG TERBACA SEBAGAI STRING KOSONG
         while let Token::String(s) = self.peek() {
             if s.is_empty() {
                 self.advance();
@@ -216,11 +316,7 @@ impl Parser {
         match self.advance() {
             Token::Number(n) => Ok(Expr::Number(n)),
             Token::String(s) => {
-                if s.is_empty() {
-                    Ok(Expr::Var("end".to_string())) // Fallback jika di awal
-                } else {
-                    Ok(Expr::String(s))
-                }
+                if s.is_empty() { Ok(Expr::Var("end".to_string())) } else { Ok(Expr::String(s)) }
             },
             Token::Identifier(name) => {
                 if self.peek() == &Token::LParen {
@@ -238,10 +334,7 @@ impl Parser {
                             if args.len() == 1 {
                                 if let Expr::Var(ref v) = args[0] {
                                     if v == "end" {
-                                        return Ok(Expr::Index { 
-                                            target: Box::new(Expr::Var(name)), 
-                                            index: Box::new(Expr::Call { name: "get_end".to_string(), args: vec![] }) 
-                                        });
+                                        return Ok(Expr::Index { target: Box::new(Expr::Var(name)), index: Box::new(Expr::Call { name: "get_end".to_string(), args: vec![] }) });
                                     }
                                 }
                                 if let Expr::Range { .. } = args[0] {
@@ -264,7 +357,7 @@ impl Parser {
                 }
             }
             Token::LBracket => self.parse_matrix_lit(),
-            Token::Transpose => Ok(Expr::String("".to_string())), // Fallback
+            Token::Transpose => Ok(Expr::String("".to_string())),
             t => Err(format!("Token tidak terduga: {:?}", t)),
         }
     }
@@ -272,67 +365,39 @@ impl Parser {
     fn parse_matrix_lit(&mut self) -> Result<Expr, String> {
         let mut rows: Vec<Vec<Expr>> = Vec::new();
         let mut current_row: Vec<Expr> = Vec::new();
-        
         if self.peek() == &Token::RBracket {
             self.advance();
             return Ok(Expr::MatrixLit { rows: Vec::new() });
         }
-
         loop {
             let expr = self.parse_range()?;
             current_row.push(expr);
-
             match self.peek() {
                 Token::Comma => { self.advance(); }
-                Token::Semicolon => { 
-                    self.advance(); 
-                    rows.push(current_row); 
-                    current_row = Vec::new(); 
-                }
-                Token::RBracket => { 
-                    self.advance(); 
-                    rows.push(current_row); 
-                    break; 
-                }
-                Token::Newline => { 
-                    self.advance(); 
-                    rows.push(current_row); 
-                    current_row = Vec::new(); 
-                }
+                Token::Semicolon => { self.advance(); rows.push(current_row); current_row = Vec::new(); }
+                Token::RBracket => { self.advance(); rows.push(current_row); break; }
+                Token::Newline => { self.advance(); rows.push(current_row); current_row = Vec::new(); }
                 t => return Err(format!("Diharapkan ',', ';', atau ']', dapat {:?}", t)),
             }
         }
-
         let is_concat = rows.iter().any(|row| row.iter().any(|e| matches!(e, Expr::Var(_) | Expr::Call { .. })));
-        
         if is_concat {
             let mut row_exprs = Vec::new();
             for row in rows {
                 if row.is_empty() { continue; }
                 let mut current_expr = row[0].clone();
                 for i in 1..row.len() {
-                    current_expr = Expr::Call {
-                        name: "horzcat".to_string(),
-                        args: vec![current_expr, row[i].clone()],
-                    };
+                    current_expr = Expr::Call { name: "horzcat".to_string(), args: vec![current_expr, row[i].clone()] };
                 }
                 row_exprs.push(current_expr);
             }
-
-            if row_exprs.is_empty() {
-                return Ok(Expr::MatrixLit { rows: Vec::new() });
-            }
-
+            if row_exprs.is_empty() { return Ok(Expr::MatrixLit { rows: Vec::new() }); }
             let mut final_expr = row_exprs[0].clone();
             for i in 1..row_exprs.len() {
-                final_expr = Expr::Call {
-                    name: "vertcat".to_string(),
-                    args: vec![final_expr, row_exprs[i].clone()],
-                };
+                final_expr = Expr::Call { name: "vertcat".to_string(), args: vec![final_expr, row_exprs[i].clone()] };
             }
             return Ok(final_expr);
         }
-
         let cols = rows[0].len();
         for row in &rows {
             if row.len() != cols { return Err("Jumlah kolom tidak sama".to_string()); }

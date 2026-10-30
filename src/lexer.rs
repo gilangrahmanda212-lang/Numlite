@@ -90,9 +90,16 @@ impl Lexer {
                     let ident = self.read_identifier();
                     match ident.as_str() {
                         "for" => Token::For,
+                        "while" => Token::While,
                         "if" => Token::If,
                         "else" => Token::Else,
                         "end" => Token::End,
+                        "switch" => Token::Switch,
+                        "case" => Token::Case,
+                        "otherwise" => Token::Otherwise,
+                        "break" => Token::Break,
+                        "continue" => Token::Continue,
+                        "function" => Token::Function,
                         _ => Token::Identifier(ident),
                     }
                 }
@@ -127,30 +134,29 @@ impl Lexer {
                 ',' => { self.advance(); Token::Comma }
                 ';' => { self.advance(); Token::Semicolon }
                 ':' => { self.advance(); Token::Colon }
-                
                 '\'' => {
                     self.advance();
-                    // SELALU ANGGAP INI STRING SAMPAI KUTIP PENUTUP
-                    // (Kita akan menangani Transpose di Parser)
-                    let mut s = String::new();
-                    while let Some(ch) = self.peek() {
-                        if ch == '\'' {
+                    let is_string = if let Some(next) = self.peek() {
+                        next.is_alphanumeric() || next == ' '
+                    } else { false };
+
+                    if is_string {
+                        let mut s = String::new();
+                        while let Some(ch) = self.peek() {
+                            if ch == '\'' {
+                                self.advance();
+                                break;
+                            }
+                            s.push(ch);
                             self.advance();
-                            break;
                         }
-                        s.push(ch);
-                        self.advance();
+                        Token::String(s)
+                    } else {
+                        Token::Transpose
                     }
-                    Token::String(s)
                 }
-                
                 '^' => { self.advance(); Token::Caret }
-                
-                '&' => {
-                    self.advance();
-                    continue;
-                }
-                
+                '&' => { self.advance(); continue; }
                 _ => return Err(format!("Karakter tidak dikenal: '{}'", c)),
             };
             tokens.push(token);
