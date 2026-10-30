@@ -39,7 +39,6 @@ fn run_cli() {
     println!("Ketik 'exit' untuk keluar.\n");
 
     let mut env: Env = Env::new();
-    // Daftarkan konstanta pi
     env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
 
     loop {
@@ -81,11 +80,8 @@ fn run_cli() {
         while !parser.is_at_eof() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
-                    if let Stmt::Plot { title, x, y } = stmt {
-                        let x_val = numlite::eval::eval(&x, &env).unwrap_or(Value::Scalar(0.0)).as_matrix();
-                        let y_val = numlite::eval::eval(&y, &env).unwrap_or(Value::Scalar(0.0)).as_matrix();
-                        // Di CLI, kita hanya mencatat grafik diabaikan
-                        let _ = (title, x_val.data, y_val.data);
+                    // PERBAIKAN DI SINI: Gunakan `..` untuk mengabaikan field lain
+                    if let Stmt::Plot { .. } = stmt {
                         println!("[Grafik diabaikan di Mode CLI]");
                     } else {
                         // Siapkan buffer untuk menangkap output teks
