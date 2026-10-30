@@ -176,8 +176,82 @@ fn matrix_mul(l: &Value, r: &Value) -> Result<Value, String> {
     elementwise(l, r, |a, b| Ok(a * b))
 }
 
+// FUNGSI PEMBANTU UNTUK FORMAT STRING (fprintf/sprintf)
+pub fn format_string(fmt: &str, args: &[Value]) -> String {
+    let mut out = String::new();
+    let mut arg_idx = 0;
+    let mut chars = fmt.chars().peekable();
+    
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let mut spec = String::new();
+            while let Some(&next_c) = chars.peek() {
+                if next_c.is_alphabetic() { break; }
+                spec.push(chars.next().unwrap());
+            }
+            if let Some(type_c) = chars.next() {
+                if arg_idx < args.len() {
+                    let val = &args[arg_idx];
+                    let scalar = val.as_scalar().unwrap_or(0.0);
+                    let mut handled = false;
+                    
+                    if type_c == 'd' || type_c == 'i' {
+                        out.push_str(&format!("{}", scalar as i64));
+                        handled = true;
+                    } else if type_c == 'f' || type_c == 'g' || type_c == 'e' {
+                        if let Some(stripped) = spec.strip_prefix('.') {
+                            if let Ok(prec) = stripped.parse::<usize>() {
+                                out.push_str(&format!("{:.*}", prec, scalar));
+                                handled = true;
+                            }
+                        }
+                        if !handled {
+                            out.push_str(&format!("{}", scalar));
+                            handled = true;
+                        }
+                    } else if type_c == 's' {
+                        match val {
+                            Value::Str(s) => out.push_str(s),
+                            v => out.push_str(&format!("{}", v)),
+                        }
+                        handled = true;
+                    }
+                    
+                    if !handled {
+                        out.push('%');
+                        out.push_str(&spec);
+                        out.push(type_c);
+                    }
+                    arg_idx += 1;
+                } else {
+                    out.push('%');
+                    out.push_str(&spec);
+                    out.push(type_c);
+                }
+            } else {
+                out.push('%');
+            }
+        } else if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('\\') => out.push('\\'),
+                Some(other) => { out.push('\\'); out.push(other); },
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_loop: bool) -> Result<ControlFlow, String> {
     match stmt {
+        Stmt::Plot { .. } => Ok(ControlFlow::Normal),
+        Stmt::Hold(_) => Ok(ControlFlow::Normal),
+        
         Stmt::Expr(Expr::Call { name, args }) if name == "run" => {
             if args.len() != 1 { return Err("run: butuh 1 argumen".to_string()); }
             let filename_val = eval(&args[0], env)?;
@@ -199,10 +273,25 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             }
             Ok(ControlFlow::Normal)
         }
-        Stmt::Plot { .. } => Ok(ControlFlow::Normal),
+        
         Stmt::Expr(Expr::Call { name, .. }) if name == "subplot" || name == "figure" || name == "grid" || name == "clc" || name == "clear" || name == "close" => {
             Ok(ControlFlow::Normal)
         }
+
+        // --- INTERSEPSI FPRINTF ---
+        Stmt::Expr(Expr::Call { name, args }) if name == "fprintf" => {
+            if args.is_empty() { return Err("fprintf: butuh argumen".to_string()); }
+            let mut values = Vec::new();
+            for arg in args { values.push(eval(arg, env)?); }
+            if let Some(Value::Str(fmt)) = values.get(0) {
+                let formatted = format_string(fmt, &values[1..]);
+                capture_output.push_str(&formatted);
+                Ok(ControlFlow::Normal)
+            } else {
+                Err("fprintf: argumen pertama harus string format".to_string())
+            }
+        }
+        
         Stmt::Expr(expr) => {
             if let Expr::Call { name, args } = expr {
                 if name == "disp" && args.len() == 1 {
@@ -224,6 +313,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             }
             Ok(ControlFlow::Normal)
         }
+        
         Stmt::Assign { name, value } => {
             let v = eval(value, env)?;
             if !is_in_loop {
@@ -236,6 +326,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             env.insert(name.clone(), v);
             Ok(ControlFlow::Normal)
         }
+        
         Stmt::For { var, iter, body } => {
             let iter_val = eval(iter, env)?;
             for val in iter_val.as_matrix().data {
@@ -252,6 +343,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             }
             Ok(ControlFlow::Normal)
         }
+        
         Stmt::While { cond, body } => {
             loop {
                 let cond_val = eval(cond, env)?;
@@ -269,6 +361,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             }
             Ok(ControlFlow::Normal)
         }
+        
         Stmt::If { cond, then_body, else_body } => {
             let cond_val = eval(cond, env)?;
             let is_true = cond_val.as_scalar().unwrap_or(0.0) != 0.0;
@@ -285,6 +378,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             }
             Ok(ControlFlow::Normal)
         }
+        
         Stmt::Switch { expr, cases, otherwise } => {
             let val = eval(expr, env)?;
             let mut matched = false;
@@ -314,8 +408,10 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             }
             Ok(ControlFlow::Normal)
         }
+        
         Stmt::Break => Ok(ControlFlow::Break),
         Stmt::Continue => Ok(ControlFlow::Continue),
+        
         Stmt::FunctionDef(f) => {
             env.insert(f.name.clone(), Value::Function(f.clone()));
             Ok(ControlFlow::Normal)
@@ -512,6 +608,41 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
 
         ("disp", 1) => match &args[0] { Value::Str(s) => return Ok(Value::Str(format!("{}\n", s))), Value::Scalar(n) => return Ok(Value::Str(format!("{}\n", n))), v => return Ok(Value::Str(format!("{}\n", v))), },
         ("cumsum", 1) => { let m = args[0].as_matrix(); let mut data = Vec::with_capacity(m.data.len()); let mut sum = 0.0; for &v in &m.data { sum += v; data.push(sum); } Ok(Value::Matrix(Matrix::new(1, data.len(), data))) }
+        
+        // --- FITUR STRING BARU ---
+        ("strcat", _) => {
+            let mut result = String::new();
+            for arg in args {
+                match arg {
+                    Value::Str(s) => result.push_str(s),
+                    v => result.push_str(&format!("{}", v)),
+                }
+            }
+            Ok(Value::Str(result))
+        }
+        ("num2str", 1) => {
+            match &args[0] {
+                Value::Str(s) => Ok(Value::Str(s.clone())),
+                v => Ok(Value::Str(format!("{}", v))),
+            }
+        }
+        ("str2num", 1) => {
+            if let Value::Str(s) = &args[0] {
+                let cleaned = s.trim();
+                match cleaned.parse::<f64>() {
+                    Ok(n) => Ok(Value::Scalar(n)),
+                    Err(_) => Err(format!("str2num: tidak bisa mengonversi '{}' ke angka", cleaned)),
+                }
+            } else { Err("str2num: argumen harus string".to_string()) }
+        }
+        ("sprintf", _) => {
+            if args.is_empty() { return Err("sprintf: butuh argumen".to_string()); }
+            if let Value::Str(fmt) = &args[0] {
+                Ok(Value::Str(format_string(fmt, &args[1..])))
+            } else {
+                Err("sprintf: argumen pertama harus string".to_string())
+            }
+        }
         
         _ => Err(format!("Fungsi '{}' dengan {} argumen belum didukung", name, args.len())),
     }

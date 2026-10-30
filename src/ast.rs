@@ -4,7 +4,7 @@ pub enum Expr {
     String(String),
     Var(String),
     Binary { op: BinOp, left: Box<Expr>, right: Box<Expr> },
-    Not(Box<Expr>), // <-- BARU
+    Not(Box<Expr>),
     MatrixLit { rows: Vec<Vec<Expr>> },
     Transpose(Box<Expr>),
     Call { name: String, args: Vec<Expr> },
@@ -16,7 +16,7 @@ pub enum Expr {
 pub enum BinOp {
     Add, Sub, Mul, Div, EMul, EDiv, EPow, Pow,
     Eq, Neq, Lt, Gt, Le, Ge,
-    And, Or, // <-- BARU
+    And, Or,
 }
 
 #[derive(Debug, Clone, PartialEq)] 
@@ -24,6 +24,12 @@ pub struct FunctionDef {
     pub name: String,
     pub params: Vec<String>,
     pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlotType {
+    Line,
+    Stem,
 }
 
 #[derive(Debug, Clone, PartialEq)] 
@@ -37,5 +43,13 @@ pub enum Stmt {
     Break,
     Continue,
     FunctionDef(FunctionDef),
-    Plot { title: String, x: Expr, y: Expr },
+    Plot {
+        title: String,
+        xlabel: String,
+        ylabel: String,
+        plot_type: PlotType,
+        x: Option<Expr>,
+        y: Expr,
+    },
+    Hold(bool),
 }

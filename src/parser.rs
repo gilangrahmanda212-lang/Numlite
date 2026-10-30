@@ -1,15 +1,17 @@
-use crate::ast::{BinOp, Expr, Stmt};
+use crate::ast::{BinOp, Expr, PlotType, Stmt};
 use crate::token::Token;
 
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     current_title: String,
+    current_xlabel: String,
+    current_ylabel: String,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0, current_title: String::new() }
+        Parser { tokens, pos: 0, current_title: String::new(), current_xlabel: String::new(), current_ylabel: String::new() }
     }
 
     pub fn is_at_eof(&self) -> bool { self.peek() == &Token::Eof }
@@ -26,6 +28,20 @@ impl Parser {
     pub fn parse_stmt(&mut self) -> Result<Stmt, String> {
         self.skip_newlines();
         if self.peek() == &Token::Eof { return Err("Eof".to_string()); }
+
+        if let Token::Identifier(id) = self.peek().clone() {
+            if id == "hold" {
+                self.advance();
+                match self.advance() {
+                    Token::Identifier(action) => {
+                        if action == "on" { return Ok(Stmt::Hold(true)); }
+                        else if action == "off" { return Ok(Stmt::Hold(false)); }
+                        else { return Err("Diharapkan 'on' atau 'off' setelah 'hold'".to_string()); }
+                    }
+                    _ => return Err("Diharapkan 'on' atau 'off' setelah 'hold'".to_string()),
+                }
+            }
+        }
 
         if self.peek() == &Token::Function {
             self.advance();
@@ -187,14 +203,32 @@ impl Parser {
                         match name.as_str() {
                             "title" => {
                                 if let Some(Expr::String(s)) = args.get(0) { self.current_title = s.clone(); }
-                                return Ok(Stmt::Expr(Expr::Number(0.0)));
+                                return Ok(Stmt::Expr(Expr::Call { name: "figure".to_string(), args: vec![] }));
                             }
-                            "plot" => {
-                                if args.len() >= 2 {
-                                    let title = self.current_title.clone();
-                                    self.current_title = String::new();
-                                    return Ok(Stmt::Plot { title, x: args[0].clone(), y: args[1].clone() });
-                                }
+                            "xlabel" => {
+                                if let Some(Expr::String(s)) = args.get(0) { self.current_xlabel = s.clone(); }
+                                return Ok(Stmt::Expr(Expr::Call { name: "figure".to_string(), args: vec![] }));
+                            }
+                            "ylabel" => {
+                                if let Some(Expr::String(s)) = args.get(0) { self.current_ylabel = s.clone(); }
+                                return Ok(Stmt::Expr(Expr::Call { name: "figure".to_string(), args: vec![] }));
+                            }
+                            "plot" | "stem" => {
+                                let (x_opt, y_expr) = if args.len() == 1 {
+                                    (None, args[0].clone())
+                                } else if args.len() == 2 {
+                                    (Some(args[0].clone()), args[1].clone())
+                                } else {
+                                    return Err(format!("{}: butuh 1 atau 2 argumen", name));
+                                };
+                                
+                                let title = self.current_title.clone();
+                                let xlabel = self.current_xlabel.clone();
+                                let ylabel = self.current_ylabel.clone();
+                                self.current_title.clear(); self.current_xlabel.clear(); self.current_ylabel.clear();
+                                
+                                let plot_type = if name == "plot" { PlotType::Line } else { PlotType::Stem };
+                                return Ok(Stmt::Plot { title, xlabel, ylabel, plot_type, x: x_opt, y: y_expr });
                             }
                             _ => {}
                         }
@@ -295,12 +329,20 @@ impl Parser {
         self.parse_postfix()
     }
 
+    // PERBAIKAN: Menangani Token::Transpose secara langsung
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_factor()?;
-        while let Token::String(s) = self.peek() {
-            if s.is_empty() {
+        loop {
+            if self.peek() == &Token::Transpose {
                 self.advance();
                 expr = Expr::Transpose(Box::new(expr));
+            } else if let Token::String(s) = self.peek() {
+                if s.is_empty() {
+                    self.advance();
+                    expr = Expr::Transpose(Box::new(expr));
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
@@ -353,7 +395,7 @@ impl Parser {
                 }
             }
             Token::LBracket => self.parse_matrix_lit(),
-            Token::Transpose => Ok(Expr::String("".to_string())),
+            // HAPUS: Token::Transpose => Ok(Expr::String("".to_string())),
             Token::End => Ok(Expr::Var("end".to_string())),
             t => Err(format!("Token tidak terduga: {:?}", t)),
         }
