@@ -123,6 +123,17 @@ impl Lexer {
                     if self.peek() == Some('=') { self.advance(); Token::Ge }
                     else { Token::Gt }
                 }
+                '&' => {
+                    self.advance();
+                    if self.peek() == Some('&') { self.advance(); Token::And } 
+                    else { return Err("Gunakan '&&' untuk logika AND".to_string()); }
+                }
+                '|' => {
+                    self.advance();
+                    if self.peek() == Some('|') { self.advance(); Token::Or } 
+                    else { return Err("Gunakan '||' untuk logika OR".to_string()); }
+                }
+                '~' => { self.advance(); Token::Not }
                 '+' => { self.advance(); Token::Plus }
                 '-' => { self.advance(); Token::Minus }
                 '*' => { self.advance(); Token::Star }
@@ -135,12 +146,21 @@ impl Lexer {
                 ';' => { self.advance(); Token::Semicolon }
                 ':' => { self.advance(); Token::Colon }
                 '\'' => {
-                    self.advance();
-                    let is_string = if let Some(next) = self.peek() {
-                        next.is_alphanumeric() || next == ' '
-                    } else { false };
+                    // PERBAIKAN MUTLAK: Cek karakter sebelumnya
+                    let prev_c = if self.pos > 0 { Some(self.input[self.pos - 1]) } else { None };
+                    
+                    // Jika sebelumnya adalah variabel/angka/tutup kurung, ini Transpose (A')
+                    let is_transpose = match prev_c {
+                        Some(c) => c.is_alphanumeric() || c == ')' || c == ']' || c == '_',
+                        None => false,
+                    };
 
-                    if is_string {
+                    self.advance(); // buang '
+
+                    if is_transpose {
+                        Token::Transpose
+                    } else {
+                        // Baca sebagai String sampai kutip penutup
                         let mut s = String::new();
                         while let Some(ch) = self.peek() {
                             if ch == '\'' {
@@ -151,12 +171,9 @@ impl Lexer {
                             self.advance();
                         }
                         Token::String(s)
-                    } else {
-                        Token::Transpose
                     }
                 }
                 '^' => { self.advance(); Token::Caret }
-                '&' => { self.advance(); continue; }
                 _ => return Err(format!("Karakter tidak dikenal: '{}'", c)),
             };
             tokens.push(token);

@@ -4,6 +4,7 @@ pub enum Expr {
     String(String),
     Var(String),
     Binary { op: BinOp, left: Box<Expr>, right: Box<Expr> },
+    Not(Box<Expr>), // <-- BARU
     MatrixLit { rows: Vec<Vec<Expr>> },
     Transpose(Box<Expr>),
     Call { name: String, args: Vec<Expr> },
@@ -15,6 +16,7 @@ pub enum Expr {
 pub enum BinOp {
     Add, Sub, Mul, Div, EMul, EDiv, EPow, Pow,
     Eq, Neq, Lt, Gt, Le, Ge,
+    And, Or, // <-- BARU
 }
 
 #[derive(Debug, Clone, PartialEq)] 

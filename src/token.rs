@@ -3,6 +3,7 @@ pub enum Token {
     Number(f64), Identifier(String), String(String),
     Plus, Minus, Star, Slash, DotStar, DotSlash, DotCaret,
     Assign, Eq, Neq, Lt, Gt, Le, Ge,
+    And, Or, Not, // <-- BARU
     LParen, RParen, LBracket, RBracket, Comma, Semicolon, Colon,
     Transpose, Caret, Newline,
     For, While, If, Else, End, Switch, Case, Otherwise, Break, Continue,
@@ -31,6 +32,9 @@ impl Token {
             Token::Gt => "Gt".to_string(),
             Token::Le => "Le".to_string(),
             Token::Ge => "Ge".to_string(),
+            Token::And => "And".to_string(),
+            Token::Or => "Or".to_string(),
+            Token::Not => "Not".to_string(),
             Token::LParen => "LParen".to_string(),
             Token::RParen => "RParen".to_string(),
             Token::LBracket => "LBracket".to_string(),

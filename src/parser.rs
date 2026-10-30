@@ -241,6 +241,8 @@ impl Parser {
                 Token::Gt => BinOp::Gt,
                 Token::Le => BinOp::Le,
                 Token::Ge => BinOp::Ge,
+                Token::And => BinOp::And,
+                Token::Or => BinOp::Or,
                 _ => break,
             };
             self.advance();
@@ -284,6 +286,11 @@ impl Parser {
             self.advance();
             let operand = self.parse_unary()?;
             return Ok(Expr::Binary { op: BinOp::Sub, left: Box::new(Expr::Number(0.0)), right: Box::new(operand) });
+        }
+        if self.peek() == &Token::Not {
+            self.advance();
+            let operand = self.parse_unary()?;
+            return Ok(Expr::Not(Box::new(operand)));
         }
         self.parse_postfix()
     }
@@ -347,10 +354,7 @@ impl Parser {
             }
             Token::LBracket => self.parse_matrix_lit(),
             Token::Transpose => Ok(Expr::String("".to_string())),
-            
-            // PERBAIKAN DI SINI:
             Token::End => Ok(Expr::Var("end".to_string())),
-            
             t => Err(format!("Token tidak terduga: {:?}", t)),
         }
     }
