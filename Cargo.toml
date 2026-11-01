@@ -10,6 +10,7 @@ eframe = "0.27"  # <-- Library GUI
 egui = "0.27"    # <-- Library GUI
 rfd = "0.14"
 gag = "1.0"  
+winres = "0.1.12"
 
 [profile.release]
 lto = true
