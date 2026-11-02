@@ -82,6 +82,11 @@ impl Lexer {
                                 let n = self.read_number()?;
                                 Token::Number(n)
                             }
+                            // --- BARU: Deteksi Akses Struct (s.field) ---
+                            'a'..='z' | 'A'..='Z' | '_' => {
+                                self.advance(); // Buang titik
+                                Token::Dot
+                            }
                             _ => return Err(format!("Karakter '.' tidak valid")),
                         }
                     } else { return Err("Karakter '.' di akhir input".to_string()); }
@@ -142,25 +147,26 @@ impl Lexer {
                 ')' => { self.advance(); Token::RParen }
                 '[' => { self.advance(); Token::LBracket }
                 ']' => { self.advance(); Token::RBracket }
+                // --- BARU: Deteksi Cell Array ---
+                '{' => { self.advance(); Token::LBrace }
+                '}' => { self.advance(); Token::RBrace }
+                // --------------------------------
                 ',' => { self.advance(); Token::Comma }
                 ';' => { self.advance(); Token::Semicolon }
                 ':' => { self.advance(); Token::Colon }
                 '\'' => {
-                    // PERBAIKAN MUTLAK: Cek karakter sebelumnya
                     let prev_c = if self.pos > 0 { Some(self.input[self.pos - 1]) } else { None };
                     
-                    // Jika sebelumnya adalah variabel/angka/tutup kurung, ini Transpose (A')
                     let is_transpose = match prev_c {
                         Some(c) => c.is_alphanumeric() || c == ')' || c == ']' || c == '_',
                         None => false,
                     };
 
-                    self.advance(); // buang '
+                    self.advance();
 
                     if is_transpose {
                         Token::Transpose
                     } else {
-                        // Baca sebagai String sampai kutip penutup
                         let mut s = String::new();
                         while let Some(ch) = self.peek() {
                             if ch == '\'' {

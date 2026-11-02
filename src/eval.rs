@@ -30,6 +30,22 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
             let v = eval(inner, env)?;
             Ok(Value::Matrix(transpose(&v.as_matrix())))
         }
+        Expr::CellLit { elements } => {
+            let mut vals = Vec::new();
+            for el in elements {
+                vals.push(eval(el, env)?);
+            }
+            Ok(Value::Cell(vals))
+        }
+        Expr::StructAccess { object, field } => {
+            let obj_val = eval(object, env)?;
+            match obj_val {
+                Value::Struct(map) => {
+                    map.get(field).cloned().ok_or_else(|| format!("Field '{}' tidak ditemukan", field))
+                }
+                _ => Err(format!("Objek bukan struct, tidak bisa mengakses field '{}'", field)),
+            }
+        }
         Expr::Call { name, args } => {
             let mut values = Vec::new();
             for arg in args { values.push(eval(arg, env)?); }
@@ -250,6 +266,43 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
     match stmt {
         Stmt::Plot { .. } => Ok(ControlFlow::Normal),
         Stmt::Hold(_) => Ok(ControlFlow::Normal),
+        
+        Stmt::StructAssign { object, field, value } => {
+            let val = eval(value, env)?;
+            
+            let mut map = match env.get(object) {
+                Some(Value::Struct(m)) => m.clone(),
+                None => HashMap::new(),
+                _ => return Err(format!("Variabel '{}' sudah ada dan bukan struct", object)),
+            };
+
+            let parts: Vec<&str> = field.split('.').collect();
+            
+            fn insert_nested(map: &mut HashMap<String, Value>, parts: &[&str], val: Value) -> Result<(), String> {
+                if parts.len() == 1 {
+                    map.insert(parts[0].to_string(), val);
+                    Ok(())
+                } else {
+                    let key = parts[0].to_string();
+                    let next_val = map.entry(key).or_insert_with(|| Value::Struct(HashMap::new()));
+                    match next_val {
+                        Value::Struct(inner_map) => insert_nested(inner_map, &parts[1..], val),
+                        _ => Err(format!("Field '{}' sudah ada dan bukan struct", parts[0])),
+                    }
+                }
+            }
+
+                        if let Err(e) = insert_nested(&mut map, &parts, val) {
+                return Err(e);
+            }
+
+            env.insert(object.clone(), Value::Struct(map));
+            
+            if !is_in_loop {
+                capture_output.push_str(&format!("{}.{} = OK\n", object, field));
+            }
+            Ok(ControlFlow::Normal)
+        }
         
         Stmt::Expr(Expr::Call { name, args }) if name == "run" => {
             if args.len() != 1 { return Err("run: butuh 1 argumen".to_string()); }
@@ -550,7 +603,7 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             Ok(Value::Matrix(Matrix::new(1, n, data)))
         }
 
-                ("xcorr", 2) => {
+        ("xcorr", 2) => {
             let x = args[0].as_matrix();
             let y = args[1].as_matrix();
             if x.data.len() != y.data.len() { return Err("xcorr: panjang input harus sama".to_string()); }
@@ -721,3 +774,4 @@ fn power_iteration(m: &Matrix, max_iter: usize) -> Result<f64, String> {
     }
     Ok(eigenvalue)
 }
+               

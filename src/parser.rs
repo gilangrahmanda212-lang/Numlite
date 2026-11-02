@@ -29,6 +29,31 @@ impl Parser {
         self.skip_newlines();
         if self.peek() == &Token::Eof { return Err("Eof".to_string()); }
 
+        // --- DETEKSI AWAL UNTUK STRUCT ASSIGNMENT (s.field = ...) ---
+        if let Token::Identifier(name) = self.peek().clone() {
+            if self.tokens.get(self.pos + 1) == Some(&Token::Dot) {
+                // Ini adalah struct assignment
+                self.advance(); // buang identifier (s)
+                
+                // Baca rantai titik (misal: mhs.alamat.kota)
+                let mut fields = Vec::new();
+                while self.peek() == &Token::Dot {
+                    self.advance(); // buang titik (.)
+                    match self.advance() {
+                        Token::Identifier(f) => fields.push(f),
+                        _ => return Err("Diharapkan nama field setelah titik".to_string()),
+                    };
+                }
+                
+                if self.advance() != Token::Assign {
+                    return Err("Diharapkan '=' setelah nama field".to_string());
+                }
+                let value = self.parse_range()?;
+                // Gabungkan field dengan titik (misal: "alamat.kota")
+                return Ok(Stmt::StructAssign { object: name, field: fields.join("."), value });
+            }
+        }
+
         if let Token::Identifier(id) = self.peek().clone() {
             if id == "hold" {
                 self.advance();
@@ -329,7 +354,6 @@ impl Parser {
         self.parse_postfix()
     }
 
-    // PERBAIKAN: Menangani Token::Transpose secara langsung
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_factor()?;
         loop {
@@ -343,6 +367,13 @@ impl Parser {
                 } else {
                     break;
                 }
+            } else if self.peek() == &Token::Dot {
+                self.advance();
+                let field = match self.advance() {
+                    Token::Identifier(f) => f,
+                    _ => return Err("Diharapkan nama field setelah titik".to_string()),
+                };
+                expr = Expr::StructAccess { object: Box::new(expr), field };
             } else {
                 break;
             }
@@ -395,10 +426,28 @@ impl Parser {
                 }
             }
             Token::LBracket => self.parse_matrix_lit(),
-            // HAPUS: Token::Transpose => Ok(Expr::String("".to_string())),
+            Token::LBrace => self.parse_cell_lit(),
             Token::End => Ok(Expr::Var("end".to_string())),
             t => Err(format!("Token tidak terduga: {:?}", t)),
         }
+    }
+
+    fn parse_cell_lit(&mut self) -> Result<Expr, String> {
+        let mut elements = Vec::new();
+        if self.peek() == &Token::RBrace {
+            self.advance();
+            return Ok(Expr::CellLit { elements: Vec::new() });
+        }
+        loop {
+            let expr = self.parse_range()?;
+            elements.push(expr);
+            match self.peek() {
+                Token::Comma => { self.advance(); }
+                Token::RBrace => { self.advance(); break; }
+                t => return Err(format!("Diharapkan ',' atau '}}', dapat {:?}", t)),
+            }
+        }
+        Ok(Expr::CellLit { elements })
     }
 
     fn parse_matrix_lit(&mut self) -> Result<Expr, String> {

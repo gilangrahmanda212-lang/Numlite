@@ -261,20 +261,17 @@ impl NumLiteApp {
         let label_color = Color32::WHITE;
 
         // --- MENGHITUNG MARGIN DINAMIS ---
-        // 1. Lebar teks angka pada sumbu Y
         let y_max_str = format!("{:.1}", max_y);
         let y_min_str = format!("{:.1}", min_y);
         let max_tick_str = if y_max_str.len() > y_min_str.len() { &y_max_str } else { &y_min_str };
         let tick_width = ui.fonts(|f| f.layout_no_wrap(max_tick_str.clone(), font_grid.clone(), text_color).rect.width());
 
-        // 2. Lebar teks YLabel (karena akan diputar, tingginya menjadi lebar di layar)
         let mut ylabel_width = 0.0;
         if !plot.ylabel.is_empty() {
             let galley = ui.fonts(|f| f.layout_no_wrap(plot.ylabel.clone(), font_label.clone(), label_color));
             ylabel_width = galley.rect.height() + 10.0;
         }
 
-        // 3. Margin Kiri = lebar angka + lebar YLabel + jarak aman
         let margin_left = tick_width + ylabel_width + 20.0;
         let margin_top = 30.0;
         let margin_bottom = 45.0;
@@ -318,7 +315,6 @@ impl NumLiteApp {
             let galley = painter.layout_no_wrap(plot.ylabel.clone(), font_label, label_color);
             let text_height = galley.rect.width(); 
             
-            // Posisi teks diputar -90 derajat (dari bawah ke atas)
             let pos = egui::pos2(
                 rect.left() - tick_width - 15.0, 
                 rect.center().y + text_height / 2.0
@@ -491,14 +487,20 @@ impl eframe::App for NumLiteApp {
                     if ui.add_sized([100.0, 30.0], egui::Button::new("🗑 Clear")).clicked() {
                         self.output.clear();
                     }
+                    // TOMBOL COPY BARU
+                    if ui.add_sized([100.0, 30.0], egui::Button::new("📋 Copy")).clicked() {
+                        ui.output_mut(|o| o.copied_text = self.output.clone());
+                    }
                 });
             });
             
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add(egui::TextEdit::multiline(&mut self.output)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(f32::INFINITY)
-                    .interactive(false));
+                // Gunakan Label yang bisa diseleksi (bukan TextEdit)
+                ui.add(egui::Label::new(
+                    egui::RichText::new(&self.output)
+                        .font(egui::FontId::monospace(13.0))
+                        .color(egui::Color32::LIGHT_GRAY)
+                ).selectable(true));
             });
         });
 

@@ -3,11 +3,13 @@ pub enum Token {
     Number(f64), Identifier(String), String(String),
     Plus, Minus, Star, Slash, DotStar, DotSlash, DotCaret,
     Assign, Eq, Neq, Lt, Gt, Le, Ge,
-    And, Or, Not, // <-- BARU
+    And, Or, Not,
     LParen, RParen, LBracket, RBracket, Comma, Semicolon, Colon,
     Transpose, Caret, Newline,
     For, While, If, Else, End, Switch, Case, Otherwise, Break, Continue,
     Function,
+    Dot,          // Untuk akses struct (s.field)
+    LBrace, RBrace, // Untuk cell array
     Eof,
 }
 
@@ -56,6 +58,11 @@ impl Token {
             Token::Break => "Break".to_string(),
             Token::Continue => "Continue".to_string(),
             Token::Function => "Function".to_string(),
+            // --- TAMBAHKAN 3 BARIS INI ---
+            Token::Dot => "Dot".to_string(),
+            Token::LBrace => "LBrace".to_string(),
+            Token::RBrace => "RBrace".to_string(),
+            // ------------------------------
             Token::Eof => "Eof".to_string(),
         }
     }
