@@ -176,7 +176,6 @@ fn matrix_mul(l: &Value, r: &Value) -> Result<Value, String> {
     elementwise(l, r, |a, b| Ok(a * b))
 }
 
-// FUNGSI PEMBANTU UNTUK FORMAT STRING (fprintf/sprintf)
 pub fn format_string(fmt: &str, args: &[Value]) -> String {
     let mut out = String::new();
     let mut arg_idx = 0;
@@ -278,7 +277,6 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
 
-        // --- INTERSEPSI FPRINTF ---
         Stmt::Expr(Expr::Call { name, args }) if name == "fprintf" => {
             if args.is_empty() { return Err("fprintf: butuh argumen".to_string()); }
             let mut values = Vec::new();
@@ -497,6 +495,7 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
         ("asin", 1) => unary_fn("asin", &args[0], |x| x.asin()),
         ("acos", 1) => unary_fn("acos", &args[0], |x| x.acos()),
         ("atan", 1) => unary_fn("atan", &args[0], |x| x.atan()),
+        ("atan2", 2) => elementwise(&args[0], &args[1], |y, x| Ok(y.atan2(x))),
         ("sign", 1) => unary_fn("sign", &args[0], |x| { if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 } }),
         ("exp", 1) => unary_fn("exp", &args[0], |x| x.exp()),
         ("log", 1) => unary_fn("log", &args[0], |x| x.ln()),
@@ -551,7 +550,7 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             Ok(Value::Matrix(Matrix::new(1, n, data)))
         }
 
-        ("xcorr", 2) => {
+                ("xcorr", 2) => {
             let x = args[0].as_matrix();
             let y = args[1].as_matrix();
             if x.data.len() != y.data.len() { return Err("xcorr: panjang input harus sama".to_string()); }
@@ -609,41 +608,6 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
         ("disp", 1) => match &args[0] { Value::Str(s) => return Ok(Value::Str(format!("{}\n", s))), Value::Scalar(n) => return Ok(Value::Str(format!("{}\n", n))), v => return Ok(Value::Str(format!("{}\n", v))), },
         ("cumsum", 1) => { let m = args[0].as_matrix(); let mut data = Vec::with_capacity(m.data.len()); let mut sum = 0.0; for &v in &m.data { sum += v; data.push(sum); } Ok(Value::Matrix(Matrix::new(1, data.len(), data))) }
         
-        // --- FITUR STRING BARU ---
-        ("strcat", _) => {
-            let mut result = String::new();
-            for arg in args {
-                match arg {
-                    Value::Str(s) => result.push_str(s),
-                    v => result.push_str(&format!("{}", v)),
-                }
-            }
-            Ok(Value::Str(result))
-        }
-        ("num2str", 1) => {
-            match &args[0] {
-                Value::Str(s) => Ok(Value::Str(s.clone())),
-                v => Ok(Value::Str(format!("{}", v))),
-            }
-        }
-        ("str2num", 1) => {
-            if let Value::Str(s) = &args[0] {
-                let cleaned = s.trim();
-                match cleaned.parse::<f64>() {
-                    Ok(n) => Ok(Value::Scalar(n)),
-                    Err(_) => Err(format!("str2num: tidak bisa mengonversi '{}' ke angka", cleaned)),
-                }
-            } else { Err("str2num: argumen harus string".to_string()) }
-        }
-        ("sprintf", _) => {
-            if args.is_empty() { return Err("sprintf: butuh argumen".to_string()); }
-            if let Value::Str(fmt) = &args[0] {
-                Ok(Value::Str(format_string(fmt, &args[1..])))
-            } else {
-                Err("sprintf: argumen pertama harus string".to_string())
-            }
-        }
-        
         _ => Err(format!("Fungsi '{}' dengan {} argumen belum didukung", name, args.len())),
     }
 }
@@ -652,7 +616,11 @@ fn unary_fn<F>(name: &str, arg: &Value, f: F) -> Result<Value, String>
 where F: Fn(f64) -> f64 {
     match arg {
         Value::Scalar(x) => Ok(Value::Scalar(f(*x))),
-        Value::Matrix(m) => { let mut result = m.clone(); for v in result.data.iter_mut() { *v = f(*v); } Ok(Value::Matrix(result)) }
+        Value::Matrix(m) => {
+            let mut result = m.clone();
+            for v in result.data.iter_mut() { *v = f(*v); }
+            Ok(Value::Matrix(result))
+        }
         Value::Str(_) => Err(format!("{}: tidak bisa memproses tipe String", name)),
         _ => Err(format!("{}: tipe data tidak didukung", name)),
     }.map_err(|e: String| format!("{}: {}", name, e))
