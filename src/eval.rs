@@ -660,6 +660,39 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
 
         ("disp", 1) => match &args[0] { Value::Str(s) => return Ok(Value::Str(format!("{}\n", s))), Value::Scalar(n) => return Ok(Value::Str(format!("{}\n", n))), v => return Ok(Value::Str(format!("{}\n", v))), },
         ("cumsum", 1) => { let m = args[0].as_matrix(); let mut data = Vec::with_capacity(m.data.len()); let mut sum = 0.0; for &v in &m.data { sum += v; data.push(sum); } Ok(Value::Matrix(Matrix::new(1, data.len(), data))) }
+         ("strcat", _) => {
+            let mut result = String::new();
+            for arg in args {
+                match arg {
+                    Value::Str(s) => result.push_str(s),
+                    v => result.push_str(&format!("{}", v)),
+                }
+            }
+            Ok(Value::Str(result))
+        }
+        ("num2str", 1) => {
+            match &args[0] {
+                Value::Str(s) => Ok(Value::Str(s.clone())),
+                v => Ok(Value::Str(format!("{}", v))),
+            }
+        }
+        ("str2num", 1) => {
+            if let Value::Str(s) = &args[0] {
+                let cleaned = s.trim();
+                match cleaned.parse::<f64>() {
+                    Ok(n) => Ok(Value::Scalar(n)),
+                    Err(_) => Err(format!("str2num: tidak bisa mengonversi '{}' ke angka", cleaned)),
+                }
+            } else { Err("str2num: argumen harus string".to_string()) }
+        }
+        ("sprintf", _) => {
+            if args.is_empty() { return Err("sprintf: butuh argumen".to_string()); }
+            if let Value::Str(fmt) = &args[0] {
+                Ok(Value::Str(format_string(fmt, &args[1..])))
+            } else {
+                Err("sprintf: argumen pertama harus string".to_string())
+            }
+        }
         
         _ => Err(format!("Fungsi '{}' dengan {} argumen belum didukung", name, args.len())),
     }
