@@ -10,6 +10,8 @@ pub enum Expr {
     Call { name: String, args: Vec<Expr> },
     Range { start: Box<Expr>, step: Option<Box<Expr>>, end: Box<Expr> },
     Index { target: Box<Expr>, index: Box<Expr> },
+    StructAccess { object: Box<Expr>, field: String },
+    CellLit { elements: Vec<Expr> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,4 +54,6 @@ pub enum Stmt {
         y: Expr,
     },
     Hold(bool),
+      StructAssign { object: String, field: String, value: Expr },
+
 }

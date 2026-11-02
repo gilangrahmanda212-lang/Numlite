@@ -1,4 +1,5 @@
 use std::fmt;
+use std::collections::HashMap;
 use crate::ast::FunctionDef;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -8,6 +9,9 @@ pub enum Value {
     Complex(Complex),
     Str(String),
     Function(FunctionDef),
+    // --- BARU ---
+    Struct(HashMap<String, Value>),
+    Cell(Vec<Value>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,23 +35,48 @@ impl Matrix {
 
 impl Value {
     pub fn as_scalar(&self) -> Option<f64> {
-        match self { Value::Scalar(n) => Some(*n), Value::Matrix(m) if m.is_scalar() => Some(m.data[0]), _ => None }
+        match self { 
+            Value::Scalar(n) => Some(*n), 
+            Value::Matrix(m) if m.is_scalar() => Some(m.data[0]), 
+            _ => None 
+        }
     }
     pub fn as_complex(&self) -> Option<Complex> {
-        match self { Value::Scalar(n) => Some(Complex::new(*n, 0.0)), Value::Complex(c) => Some(c.clone()), _ => None }
+        match self { 
+            Value::Scalar(n) => Some(Complex::new(*n, 0.0)), 
+            Value::Complex(c) => Some(c.clone()), 
+            _ => None 
+        }
     }
     pub fn as_matrix(&self) -> Matrix {
-        match self { Value::Scalar(n) => Matrix::new(1, 1, vec![*n]), Value::Matrix(m) => m.clone(), Value::Complex(c) => Matrix::new(1, 1, vec![c.re]), Value::Str(_) => Matrix::new(0, 0, vec![]), Value::Function(_) => Matrix::new(0, 0, vec![]) }
+        match self { 
+            Value::Scalar(n) => Matrix::new(1, 1, vec![*n]), 
+            Value::Matrix(m) => m.clone(), 
+            Value::Complex(c) => Matrix::new(1, 1, vec![c.re]), 
+            _ => Matrix::new(0, 0, vec![]) 
+        }
     }
 }
 
 fn format_scalar(n: f64) -> String {
-    if n.fract() == 0.0 && n.abs() < 1e15 { format!("{}", n as i64) } else { let s = format!("{:.4}", n); s.trim_end_matches('0').trim_end_matches('.').to_string() }
+    if n.fract() == 0.0 && n.abs() < 1e15 { 
+        format!("{}", n as i64) 
+    } else { 
+        let s = format!("{:.4}", n); 
+        s.trim_end_matches('0').trim_end_matches('.').to_string() 
+    }
 }
 
 fn format_complex(c: &Complex) -> String {
-    let re_str = format_scalar(c.re); let im_str = format_scalar(c.im.abs());
-    if c.im == 0.0 { re_str } else if c.re == 0.0 { if c.im > 0.0 { format!("{}i", im_str) } else { format!("-{}i", im_str) } } else { if c.im > 0.0 { format!("{} + {}i", re_str, im_str) } else { format!("{} - {}i", re_str, im_str) } }
+    let re_str = format_scalar(c.re); 
+    let im_str = format_scalar(c.im.abs());
+    if c.im == 0.0 { 
+        re_str 
+    } else if c.re == 0.0 { 
+        if c.im > 0.0 { format!("{}i", im_str) } else { format!("-{}i", im_str) } 
+    } else { 
+        if c.im > 0.0 { format!("{} + {}i", re_str, im_str) } else { format!("{} - {}i", re_str, im_str) } 
+    }
 }
 
 impl fmt::Display for Value {
@@ -57,6 +86,21 @@ impl fmt::Display for Value {
             Value::Complex(c) => write!(f, "{}", format_complex(c)),
             Value::Str(s) => write!(f, "\"{}\"", s),
             Value::Function(func) => write!(f, "Function({})", func.name),
+            Value::Struct(map) => {
+                write!(f, "Struct with fields:\n")?;
+                for (k, v) in map {
+                    write!(f, "    {}: {}\n", k, v)?;
+                }
+                Ok(())
+            }
+            Value::Cell(vec) => {
+                write!(f, "Cell array [")?;
+                for (i, v) in vec.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", v)?;
+                }
+                write!(f, "]")
+            }
             Value::Matrix(m) => {
                 if m.is_scalar() { return write!(f, "{}", format_scalar(m.data[0])); }
                 if m.rows == 0 || m.cols == 0 { return write!(f, "[]"); }
