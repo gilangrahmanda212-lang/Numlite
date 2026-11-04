@@ -4,7 +4,7 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::value::{Matrix, Value};
 use crate::gui::{LineData, PlotData};
-use crate::ast::PlotType;
+use crate::ast::{PlotType, StmtKind};
 use egui::{Color32, Rounding};
 use std::fs;
 use std::path::PathBuf;
@@ -31,8 +31,6 @@ pub struct NumLiteApp {
     save_tx: Sender<Option<PathBuf>>,
     save_rx: Receiver<Option<PathBuf>>,
     dialog_active: bool,
-    console_minimized: bool,
-    console_height: f32, // Menyimpan tinggi panel agar tidak reset
 }
 
 impl Default for NumLiteApp {
@@ -58,8 +56,6 @@ impl Default for NumLiteApp {
             save_tx,
             save_rx,
             dialog_active: false,
-            console_minimized: false,
-            console_height: 200.0,
         }
     }
 }
@@ -190,11 +186,11 @@ impl NumLiteApp {
         while !parser.is_at_eof() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
-                    match stmt {
-                        crate::ast::Stmt::Hold(on) => {
+                    match stmt.kind {
+                        StmtKind::Hold(on) => {
                             self.hold_on = on;
                         }
-                        crate::ast::Stmt::Plot { title, xlabel, ylabel, plot_type, x, y } => {
+                        StmtKind::Plot { title, xlabel, ylabel, plot_type, x, y } => {
                             let y_val = eval(&y, &self.env).unwrap_or(Value::Scalar(0.0)).as_matrix();
                             
                             let x_val = if let Some(x_expr) = x {
@@ -206,7 +202,7 @@ impl NumLiteApp {
                             };
 
                             if x_val.data.len() != y_val.data.len() {
-                                captured_output.push_str("Error: panjang x dan y harus sama\n");
+                                captured_output.push_str(&format!("Error pada baris {}: panjang x dan y harus sama\n", stmt.line));
                                 continue;
                             }
 
@@ -224,16 +220,19 @@ impl NumLiteApp {
                         }
                         _ => {
                             if let Err(e) = exec_stmt(&stmt, &mut self.env, &mut captured_output, false) {
-                                captured_output.push_str(&format!("Error: {}\n", e));
+                                captured_output.push_str(&format!("{}\n", e));
                                 break;
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    if e != "Eof" { captured_output.push_str(&format!("Parser Error: {}\n", e)); }
-                    break;
-                }
+    if e != "Eof" { 
+        let current_line = parser.current_line();
+        captured_output.push_str(&format!("Parser Error pada baris {}: {}\n", current_line, e)); 
+    }
+    break;
+}
             }
         }
         
@@ -400,7 +399,8 @@ impl eframe::App for NumLiteApp {
                     Color32::from_rgb(160, 160, 165)
                 };
 
-                let stroke = egui::Stroke::new(1.8, line_color);
+                // PERBAIKAN: Tambahkan _f32
+                let stroke = egui::Stroke::new(1.8_f32, line_color);
                 let center = rect.center();
                 let half_w = 8.0;
 
@@ -532,39 +532,28 @@ impl eframe::App for NumLiteApp {
 
         // 5. PANEL CONSOLE LOG
         let available_height = ctx.available_rect().height();
-        let min_console_height = 40.0;
+        let min_console_height = 38.0;
         let max_console_height = (available_height - 120.0).max(min_console_height);
 
-        let mut console_panel = egui::TopBottomPanel::bottom("console_panel")
+        let console_panel = egui::TopBottomPanel::bottom("console_panel")
             .resizable(true)
+            .default_height(200.0)
             .min_height(min_console_height)
             .max_height(max_console_height)
             .frame(egui::Frame::none()
                 .fill(Color32::from_rgb(25, 25, 25))
                 .inner_margin(egui::Margin { left: 10.0, right: 10.0, top: 8.0, bottom: 8.0 })
-                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(50, 50, 50)))
+                // PERBAIKAN: Tambahkan _f32
+                .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(50, 50, 50)))
             );
 
-        // Logika pintar untuk mengatur tinggi panel
-        if self.console_minimized {
-            // Jika minimized, jangan paksa egui menyimpan tinggi baru jika user sedang dragging
-            if !ctx.input(|i| i.pointer.any_down()) {
-                ctx.memory_mut(|mem| mem.data.insert_temp(egui::Id::new("console_panel"), min_console_height));
-            }
-        } else {
-            // Jika normal, gunakan tinggi yang sudah disimpan
-            console_panel = console_panel.default_height(self.console_height);
-        }
-
-        let response = console_panel.show(ctx, |ui| {
+        console_panel.show(ctx, |ui| {
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                 // HEADER CONSOLE
                 ui.horizontal(|ui| {
                     ui.heading("Console Output");
                     
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    
-
                         // Tombol Copy
                         if ui.add_sized([80.0, 24.0], egui::Button::new("📋 Copy")).clicked() {
                             ui.output_mut(|o| o.copied_text = self.output.clone());
@@ -596,19 +585,6 @@ impl eframe::App for NumLiteApp {
             });
         });
 
-        let actual_height = response.response.rect.height();
-
-        // Jika sedang minimized tapi tingginya bertambah (karena ditarik user), buka kembali
-        if self.console_minimized && actual_height > min_console_height + 15.0 {
-            self.console_minimized = false;
-            self.console_height = actual_height;
-        }
-
-        // Simpan tinggi untuk digunakan di frame berikutnya (jika tidak minimized)
-        if !self.console_minimized {
-            self.console_height = actual_height;
-        }
-
         // 6. PANEL TENGAH (EDITOR)
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(bg_editor).inner_margin(margin_konten))
@@ -639,5 +615,24 @@ impl eframe::App for NumLiteApp {
 
         self.handle_open_result();
         self.handle_save_result();
+
+        if let Some(idx) = self.popup_plot {
+            if let Some(plot) = self.plots.get(idx) {
+                let mut is_open = true;
+                egui::Window::new(format!("Zoom - {}", if plot.title.is_empty() { "Grafik" } else { &plot.title }))
+                    .open(&mut is_open)
+                    .resizable(true)
+                    .default_size([800.0, 500.0])
+                    .show(ctx, |ui| {
+                        self.draw_plot(ui, plot, 450.0); 
+                    });
+                
+                if !is_open {
+                    self.popup_plot = None;
+                }
+            } else {
+                self.popup_plot = None;
+            }
+        }
     }
 }

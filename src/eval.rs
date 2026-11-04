@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::ast::{BinOp, Expr, Stmt};
+use crate::ast::{BinOp, Expr, ExprKind, Stmt, StmtKind};
 use crate::value::{Matrix, Value};
 
 pub type Env = HashMap<String, Value>;
@@ -12,37 +12,37 @@ pub enum ControlFlow {
 }
 
 pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
-    match expr {
-        Expr::CellLit { elements } => {
+    let res = match &expr.kind {
+        ExprKind::CellLit { elements } => {
             let mut vals = Vec::new();
             for el in elements { vals.push(eval(el, env)?); }
             Ok(Value::Cell(vals))
         }
-        Expr::StructAccess { object, field } => {
+        ExprKind::StructAccess { object, field } => {
             let obj_val = eval(object, env)?;
             match obj_val {
                 Value::Struct(map) => map.get(field).cloned().ok_or_else(|| format!("Field '{}' tidak ditemukan", field)),
                 _ => Err(format!("Objek bukan struct, tidak bisa mengakses field '{}'", field)),
             }
         }
-        Expr::Number(n) => Ok(Value::Scalar(*n)),
-        Expr::String(s) => Ok(Value::Str(s.clone())),
-        Expr::Var(name) => env.get(name).cloned().ok_or_else(|| format!("Variabel '{}' belum didefinisikan", name)),
-        Expr::Not(inner) => {
+        ExprKind::Number(n) => Ok(Value::Scalar(*n)),
+        ExprKind::String(s) => Ok(Value::Str(s.clone())),
+        ExprKind::Var(name) => env.get(name).cloned().ok_or_else(|| format!("Variabel '{}' belum didefinisikan", name)),
+        ExprKind::Not(inner) => {
             let v = eval(inner, env)?.as_scalar().unwrap_or(0.0);
             Ok(Value::Scalar(if v == 0.0 { 1.0 } else { 0.0 }))
         }
-        Expr::Binary { op, left, right } => {
+        ExprKind::Binary { op, left, right } => {
             let l = eval(left, env)?;
             let r = eval(right, env)?;
             apply_binop(*op, &l, &r)
         }
-        Expr::MatrixLit { rows } => eval_matrix_lit(rows, env),
-        Expr::Transpose(inner) => {
+        ExprKind::MatrixLit { rows } => eval_matrix_lit(rows, env),
+        ExprKind::Transpose(inner) => {
             let v = eval(inner, env)?;
             Ok(Value::Matrix(transpose(&v.as_matrix())))
         }
-        Expr::Call { name, args } => {
+        ExprKind::Call { name, args } => {
             let mut values = Vec::new();
             for arg in args { values.push(eval(arg, env)?); }
             
@@ -76,7 +76,7 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
                 call_builtin(name, &values)
             }
         }
-        Expr::Range { start, step, end } => {
+        ExprKind::Range { start, step, end } => {
             let start_val = eval(start, env)?.as_scalar().ok_or("Range: start harus scalar")?;
             let end_val = eval(end, env)?.as_scalar().ok_or("Range: end harus scalar")?;
             let step_val = if let Some(s) = step { eval(s, env)?.as_scalar().ok_or("Range: step harus scalar")? } else { 1.0 };
@@ -90,10 +90,10 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
             }
             Ok(Value::Matrix(Matrix::new(1, data.len(), data)))
         }
-        Expr::Index { target, index } => {
+        ExprKind::Index { target, index } => {
             let target_val = eval(target, env)?;
             let mat = target_val.as_matrix();
-            let idx_mat = if let Expr::Call { name, .. } = &**index {
+            let idx_mat = if let ExprKind::Call { name, .. } = &index.kind {
                 if name == "get_end" {
                     Matrix::new(1, 1, vec![mat.data.len() as f64])
                 } else { eval(index, env)?.as_matrix() }
@@ -107,7 +107,12 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
             }
             Ok(Value::Matrix(Matrix::new(1, result_data.len(), result_data)))
         }
-    }
+    };
+
+    res.map_err(|e| {
+        if e.starts_with("Error pada baris") { e }
+        else { format!("Error pada baris {}: {}", expr.line, e) }
+    })
 }
 
 fn eval_matrix_lit(rows: &[Vec<Expr>], env: &Env) -> Result<Value, String> {
@@ -259,8 +264,8 @@ pub fn format_string(fmt: &str, args: &[Value]) -> String {
 }
 
 pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_loop: bool) -> Result<ControlFlow, String> {
-    match stmt {
-        Stmt::StructAssign { object, field, value } => {
+    let res = match &stmt.kind {
+        StmtKind::StructAssign { object, field, value } => {
             let val = eval(value, env)?;
             
             let mut map = match env.get(object) {
@@ -297,10 +302,10 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
 
-        Stmt::Plot { .. } => Ok(ControlFlow::Normal),
-        Stmt::Hold(_) => Ok(ControlFlow::Normal),
+        StmtKind::Plot { .. } => Ok(ControlFlow::Normal),
+        StmtKind::Hold(_) => Ok(ControlFlow::Normal),
         
-        Stmt::Expr(Expr::Call { name, args }) if name == "run" => {
+        StmtKind::Expr(Expr { kind: ExprKind::Call { name, args }, .. }) if name == "run" => {
             if args.len() != 1 { return Err("run: butuh 1 argumen".to_string()); }
             let filename_val = eval(&args[0], env)?;
             let filename = match filename_val {
@@ -322,11 +327,11 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
         
-        Stmt::Expr(Expr::Call { name, .. }) if name == "subplot" || name == "figure" || name == "grid" || name == "clc" || name == "clear" || name == "close" => {
+        StmtKind::Expr(Expr { kind: ExprKind::Call { name, .. }, .. }) if name == "subplot" || name == "figure" || name == "grid" || name == "clc" || name == "clear" || name == "close" => {
             Ok(ControlFlow::Normal)
         }
 
-        Stmt::Expr(Expr::Call { name, args }) if name == "fprintf" => {
+        StmtKind::Expr(Expr { kind: ExprKind::Call { name, args }, .. }) if name == "fprintf" => {
             if args.is_empty() { return Err("fprintf: butuh argumen".to_string()); }
             let mut values = Vec::new();
             for arg in args { values.push(eval(arg, env)?); }
@@ -339,8 +344,8 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             }
         }
         
-        Stmt::Expr(expr) => {
-            if let Expr::Call { name, args } = expr {
+        StmtKind::Expr(expr) => {
+            if let ExprKind::Call { name, args } = &expr.kind {
                 if name == "disp" && args.len() == 1 {
                     let val = eval(&args[0], env)?;
                     match val {
@@ -361,7 +366,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
         
-        Stmt::Assign { name, value } => {
+        StmtKind::Assign { name, value } => {
             let v = eval(value, env)?;
             env.insert(name.clone(), v.clone());
             
@@ -375,7 +380,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
         
-        Stmt::For { var, iter, body } => {
+        StmtKind::For { var, iter, body } => {
             let iter_val = eval(iter, env)?;
             for val in iter_val.as_matrix().data {
                 env.insert(var.clone(), Value::Scalar(val));
@@ -392,7 +397,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
         
-        Stmt::While { cond, body } => {
+        StmtKind::While { cond, body } => {
             loop {
                 let cond_val = eval(cond, env)?;
                 let is_true = cond_val.as_scalar().unwrap_or(0.0) != 0.0;
@@ -410,7 +415,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
         
-        Stmt::If { cond, then_body, else_body } => {
+        StmtKind::If { cond, then_body, else_body } => {
             let cond_val = eval(cond, env)?;
             let is_true = cond_val.as_scalar().unwrap_or(0.0) != 0.0;
             if is_true {
@@ -427,7 +432,7 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
         
-        Stmt::Switch { expr, cases, otherwise } => {
+        StmtKind::Switch { expr, cases, otherwise } => {
             let val = eval(expr, env)?;
             let mut matched = false;
             for (case_expr, body) in cases {
@@ -457,14 +462,19 @@ pub fn exec_stmt(stmt: &Stmt, env: &mut Env, capture_output: &mut String, is_in_
             Ok(ControlFlow::Normal)
         }
         
-        Stmt::Break => Ok(ControlFlow::Break),
-        Stmt::Continue => Ok(ControlFlow::Continue),
+        StmtKind::Break => Ok(ControlFlow::Break),
+        StmtKind::Continue => Ok(ControlFlow::Continue),
         
-        Stmt::FunctionDef(f) => {
+        StmtKind::FunctionDef(f) => {
             env.insert(f.name.clone(), Value::Function(f.clone()));
             Ok(ControlFlow::Normal)
         }
-    }
+    };
+
+    res.map_err(|e| {
+        if e.starts_with("Error pada baris") { e }
+        else { format!("Error pada baris {}: {}", stmt.line, e) }
+    })
 }
 
 fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
@@ -600,7 +610,7 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
             Ok(Value::Matrix(Matrix::new(1, n, data)))
         }
 
-                ("xcorr", 2) => {
+        ("xcorr", 2) => {
             let x = args[0].as_matrix();
             let y = args[1].as_matrix();
             if x.data.len() != y.data.len() { return Err("xcorr: panjang input harus sama".to_string()); }
@@ -657,6 +667,40 @@ fn call_builtin(name: &str, args: &[Value]) -> Result<Value, String> {
 
         ("disp", 1) => match &args[0] { Value::Str(s) => return Ok(Value::Str(format!("{}\n", s))), Value::Scalar(n) => return Ok(Value::Str(format!("{}\n", n))), v => return Ok(Value::Str(format!("{}\n", v))), },
         ("cumsum", 1) => { let m = args[0].as_matrix(); let mut data = Vec::with_capacity(m.data.len()); let mut sum = 0.0; for &v in &m.data { sum += v; data.push(sum); } Ok(Value::Matrix(Matrix::new(1, data.len(), data))) }
+        
+        ("strcat", _) => {
+            let mut result = String::new();
+            for arg in args {
+                match arg {
+                    Value::Str(s) => result.push_str(s),
+                    v => result.push_str(&format!("{}", v)),
+                }
+            }
+            Ok(Value::Str(result))
+        }
+        ("num2str", 1) => {
+            match &args[0] {
+                Value::Str(s) => Ok(Value::Str(s.clone())),
+                v => Ok(Value::Str(format!("{}", v))),
+            }
+        }
+        ("str2num", 1) => {
+            if let Value::Str(s) = &args[0] {
+                let cleaned = s.trim();
+                match cleaned.parse::<f64>() {
+                    Ok(n) => Ok(Value::Scalar(n)),
+                    Err(_) => Err(format!("str2num: tidak bisa mengonversi '{}' ke angka", cleaned)),
+                }
+            } else { Err("str2num: argumen harus string".to_string()) }
+        }
+        ("sprintf", _) => {
+            if args.is_empty() { return Err("sprintf: butuh argumen".to_string()); }
+            if let Value::Str(fmt) = &args[0] {
+                Ok(Value::Str(format_string(fmt, &args[1..])))
+            } else {
+                Err("sprintf: argumen pertama harus string".to_string())
+            }
+        }
         
         _ => Err(format!("Fungsi '{}' dengan {} argumen belum didukung", name, args.len())),
     }
