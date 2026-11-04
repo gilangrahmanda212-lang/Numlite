@@ -90,14 +90,19 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, String> {
             }
             Ok(Value::Matrix(Matrix::new(1, data.len(), data)))
         }
-        ExprKind::Index { target, index } => {
+                ExprKind::Index { target, index } => {
             let target_val = eval(target, env)?;
             let mat = target_val.as_matrix();
+            
+            // PERBAIKAN: Suntikkan nilai 'end' ke environment sementara
+            let mut local_env = env.clone();
+            local_env.insert("end".to_string(), Value::Scalar(mat.data.len() as f64));
+
             let idx_mat = if let ExprKind::Call { name, .. } = &index.kind {
                 if name == "get_end" {
                     Matrix::new(1, 1, vec![mat.data.len() as f64])
-                } else { eval(index, env)?.as_matrix() }
-            } else { eval(index, env)?.as_matrix() };
+                } else { eval(index, &local_env)?.as_matrix() }
+            } else { eval(index, &local_env)?.as_matrix() };
 
             let mut result_data = Vec::new();
             for &idx in &idx_mat.data {
