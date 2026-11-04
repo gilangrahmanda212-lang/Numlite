@@ -2,10 +2,11 @@ use std::env;
 use std::io::{self, Write};
 use crossterm::{event::{self, Event, KeyCode, KeyEvent, KeyModifiers}, terminal, cursor, execute};
 
-use numlite::ast::Stmt;
+use numlite::ast::StmtKind;
 use numlite::eval::{exec_stmt, Env};
 use numlite::lexer::Lexer;
 use numlite::parser::Parser;
+use numlite::value::Value;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -19,10 +20,16 @@ fn main() {
 }
 
 fn run_gui() {
+    // Muat ikon dari file PNG yang ada di folder utama proyek
+    let icon = eframe::icon_data::from_png_bytes(
+        &include_bytes!("../icon.png")[..]
+    ).expect("Gagal memuat icon.png. Pastikan file icon.png ada di folder utama proyek!");
+
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])
-            .with_title("NumLite - MATLAB Ringan"),
+            .with_title("NumLite - MATLAB Ringan")
+            .with_icon(icon), // Pasang ikon di sini
         ..Default::default()
     };
     
@@ -38,6 +45,7 @@ fn run_cli() {
     println!("Ketik 'exit' untuk keluar.\n");
 
     let mut env: Env = Env::new();
+    env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
 
     loop {
         let mut input = String::new();
@@ -78,25 +86,23 @@ fn run_cli() {
         while !parser.is_at_eof() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
-                    if let Stmt::Plot { title, x, y } = stmt {
-                        let x_val = numlite::eval::eval(&x, &env).unwrap_or(numlite::value::Value::Scalar(0.0)).as_matrix();
-                        let y_val = numlite::eval::eval(&y, &env).unwrap_or(numlite::value::Value::Scalar(0.0)).as_matrix();
-                        // Di CLI, kita hanya mencatat grafik diabaikan
-                        let _ = (title, x_val.data, y_val.data);
+                    // PERBAIKAN DI SINI: Gunakan stmt.kind
+                    if let StmtKind::Plot { .. } = stmt.kind {
                         println!("[Grafik diabaikan di Mode CLI]");
                     } else {
-                        // PERBAIKAN: Siapkan buffer untuk menangkap output teks
                         let mut captured_output = String::new();
                         if let Err(e) = exec_stmt(&stmt, &mut env, &mut captured_output, false) {
                             println!("Eval error: {}", e);
                         } else {
-                            // Cetak teks (ans/disp) ke terminal
                             print!("{}", captured_output);
                         }
                     }
                 }
-                Err(e) => { 
-                    if e != "Eof" { println!("Parser error: {}", e); }
+                                Err(e) => { 
+                    if e != "Eof" { 
+                        let current_line = parser.current_line();
+                        println!("Parser Error pada baris {}: {}", current_line, e); 
+                    }
                     break; 
                 }
             }

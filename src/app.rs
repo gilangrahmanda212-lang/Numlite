@@ -2,11 +2,13 @@ use eframe::egui;
 use crate::eval::{exec_stmt, eval, Env};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::value::Value;
-use crate::gui::PlotData;
+use crate::value::{Matrix, Value};
+use crate::gui::{LineData, PlotData};
+use crate::ast::{PlotType, StmtKind};
 use egui::{Color32, Rounding};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 
 pub struct CodeTab {
     pub name: String,
@@ -22,11 +24,19 @@ pub struct NumLiteApp {
     env: Env,
     plots: Vec<PlotData>,
     popup_plot: Option<usize>,
-    menu_open: bool, 
+    menu_open: bool,
+    hold_on: bool,
+    open_tx: Sender<Option<PathBuf>>,
+    open_rx: Receiver<Option<PathBuf>>,
+    save_tx: Sender<Option<PathBuf>>,
+    save_rx: Receiver<Option<PathBuf>>,
+    dialog_active: bool,
 }
 
 impl Default for NumLiteApp {
     fn default() -> Self {
+        let (open_tx, open_rx) = channel();
+        let (save_tx, save_rx) = channel();
         Self {
             tabs: vec![CodeTab {
                 name: "unsaved-code-1".to_string(),
@@ -40,6 +50,12 @@ impl Default for NumLiteApp {
             plots: Vec::new(),
             popup_plot: None,
             menu_open: false,
+            hold_on: false,
+            open_tx,
+            open_rx,
+            save_tx,
+            save_rx,
+            dialog_active: false,
         }
     }
 }
@@ -47,11 +63,13 @@ impl Default for NumLiteApp {
 impl NumLiteApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(25, 25, 25); 
+        visuals.panel_fill = Color32::from_rgb(25, 25, 25);
         visuals.window_fill = Color32::from_rgb(30, 30, 30);
         _cc.egui_ctx.set_visuals(visuals);
-        
-        Self::default()
+
+        let mut app = Self::default();
+        app.env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
+        app
     }
 
     fn get_next_unsaved_name(&self) -> String {
@@ -76,50 +94,70 @@ impl NumLiteApp {
         self.active_tab = self.tabs.len() - 1;
     }
 
-    fn save_file(&mut self) {
-        if self.tabs.is_empty() { return; }
-        let tab = &mut self.tabs[self.active_tab];
+    fn spawn_open_dialog(&mut self) {
+        if self.dialog_active { return; }
+        self.dialog_active = true;
+        let tx = self.open_tx.clone();
+        std::thread::spawn(move || {
+            let result = crate::file_dialog::open_file_dialog();
+            let _ = tx.send(result);
+        });
+    }
 
-        if tab.is_saved {
-            if let Some(path) = &tab.file_path {
-                let _ = fs::write(path, &tab.code);
-            }
-        } else {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("MATLAB Script", &["m"])
-                .set_file_name("script.m")
-                .save_file() 
-            {
-                let _ = fs::write(&path, &tab.code);
-                tab.file_path = Some(path.clone());
-                if let Some(stem) = path.file_stem() {
-                    tab.name = stem.to_string_lossy().to_string();
+    fn spawn_save_dialog(&mut self) {
+        if self.dialog_active { return; }
+        self.dialog_active = true;
+        let tx = self.save_tx.clone();
+        std::thread::spawn(move || {
+            let result = crate::file_dialog::save_file_dialog();
+            let _ = tx.send(result);
+        });
+    }
+
+    fn handle_open_result(&mut self) {
+        match self.open_rx.try_recv() {
+            Ok(Some(path)) => {
+                self.dialog_active = false;
+                if let Ok(content) = fs::read_to_string(&path) {
+                    let mut name = String::from("unknown");
+                    if let Some(stem) = path.file_stem() {
+                        name = stem.to_string_lossy().to_string();
+                    }
+                    self.tabs.push(CodeTab {
+                        name,
+                        code: content,
+                        is_saved: true,
+                        file_path: Some(path),
+                    });
+                    self.active_tab = self.tabs.len() - 1;
+                    self.menu_open = false;
                 }
-                tab.is_saved = true;
             }
+            Ok(None) => { self.dialog_active = false; }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => { self.dialog_active = false; }
         }
     }
 
-    fn open_file(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("MATLAB Script", &["m"])
-            .pick_file() 
-        {
-            if let Ok(content) = fs::read_to_string(&path) {
-                let mut name = String::from("unknown");
-                if let Some(stem) = path.file_stem() {
-                    name = stem.to_string_lossy().to_string();
+    fn handle_save_result(&mut self) {
+        match self.save_rx.try_recv() {
+            Ok(Some(path)) => {
+                self.dialog_active = false;
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    if let Err(e) = fs::write(&path, &tab.code) {
+                        self.output = format!("Gagal menyimpan: {}\n", e);
+                    } else {
+                        tab.file_path = Some(path.clone());
+                        if let Some(stem) = path.file_stem() {
+                            tab.name = stem.to_string_lossy().to_string();
+                        }
+                        tab.is_saved = true;
+                    }
                 }
-                
-                self.tabs.push(CodeTab {
-                    name,
-                    code: content,
-                    is_saved: true,
-                    file_path: Some(path),
-                });
-                self.active_tab = self.tabs.len() - 1;
-                self.menu_open = false; 
             }
+            Ok(None) => { self.dialog_active = false; }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => { self.dialog_active = false; }
         }
     }
 
@@ -127,6 +165,7 @@ impl NumLiteApp {
         self.output.clear();
         self.plots.clear();
         self.popup_plot = None;
+        self.hold_on = false;
         
         if self.tabs.is_empty() { return; }
         let code = self.tabs[self.active_tab].code.clone();
@@ -140,24 +179,60 @@ impl NumLiteApp {
         let mut parser = Parser::new(tokens);
         let mut captured_output = String::new();
 
+        if !self.env.contains_key("pi") {
+            self.env.insert("pi".to_string(), Value::Scalar(std::f64::consts::PI));
+        }
+
         while !parser.is_at_eof() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
-                    if let crate::ast::Stmt::Plot { title, x, y } = stmt {
-                        let x_val = eval(&x, &self.env).unwrap_or(Value::Scalar(0.0)).as_matrix();
-                        let y_val = eval(&y, &self.env).unwrap_or(Value::Scalar(0.0)).as_matrix();
-                        self.plots.push(PlotData { title, x: x_val.data, y: y_val.data });
-                    } else {
-                        if let Err(e) = exec_stmt(&stmt, &mut self.env, &mut captured_output, false) {
-                            captured_output.push_str(&format!("Error: {}\n", e));
-                            break;
+                    match stmt.kind {
+                        StmtKind::Hold(on) => {
+                            self.hold_on = on;
+                        }
+                        StmtKind::Plot { title, xlabel, ylabel, plot_type, x, y } => {
+                            let y_val = eval(&y, &self.env).unwrap_or(Value::Scalar(0.0)).as_matrix();
+                            
+                            let x_val = if let Some(x_expr) = x {
+                                eval(&x_expr, &self.env).unwrap_or(Value::Scalar(0.0)).as_matrix()
+                            } else {
+                                let len = y_val.data.len();
+                                let data: Vec<f64> = (1..=len).map(|i| i as f64).collect();
+                                Matrix::new(1, len, data)
+                            };
+
+                            if x_val.data.len() != y_val.data.len() {
+                                captured_output.push_str(&format!("Error pada baris {}: panjang x dan y harus sama\n", stmt.line));
+                                continue;
+                            }
+
+                            let new_line = LineData { x: x_val.data, y: y_val.data, plot_type };
+
+                            if self.hold_on && !self.plots.is_empty() {
+                                let last = self.plots.last_mut().unwrap();
+                                last.lines.push(new_line);
+                            } else {
+                                self.plots.push(PlotData {
+                                    title, xlabel, ylabel,
+                                    lines: vec![new_line],
+                                });
+                            }
+                        }
+                        _ => {
+                            if let Err(e) = exec_stmt(&stmt, &mut self.env, &mut captured_output, false) {
+                                captured_output.push_str(&format!("{}\n", e));
+                                break;
+                            }
                         }
                     }
                 }
                 Err(e) => {
-                    if e != "Eof" { captured_output.push_str(&format!("Parser Error: {}\n", e)); }
-                    break;
-                }
+    if e != "Eof" { 
+        let current_line = parser.current_line();
+        captured_output.push_str(&format!("Parser Error pada baris {}: {}\n", current_line, e)); 
+    }
+    break;
+}
             }
         }
         
@@ -168,82 +243,178 @@ impl NumLiteApp {
     }
 
     fn draw_plot(&self, ui: &mut egui::Ui, plot: &PlotData, height: f32) {
-        // PERBAIKAN: Menambahkan margin_top agar teks atas tidak terpotong
-        let margin_left = 35.0; 
-        let margin_top = 15.0; 
-        let margin_bottom = 20.0;
-        
         let (response, painter) = ui.allocate_painter(egui::vec2(ui.available_width(), height), egui::Sense::hover());
         let full_rect = response.rect;
-        
-        let rect = egui::Rect::from_min_max(
-            egui::pos2(full_rect.left() + margin_left, full_rect.top() + margin_top),
-            egui::pos2(full_rect.right(), full_rect.bottom() - margin_bottom)
-        );
 
-        if plot.x.is_empty() || plot.y.is_empty() { return; }
-        let min_x = plot.x.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_x = plot.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let min_y = plot.y.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_y = plot.y.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        if plot.lines.is_empty() || plot.lines.iter().all(|l| l.x.is_empty() || l.y.is_empty()) { return; }
+        
+        let mut min_x = f64::INFINITY; let mut max_x = f64::NEG_INFINITY;
+        let mut min_y = f64::INFINITY; let mut max_y = f64::NEG_INFINITY;
+        for line in &plot.lines {
+            for &v in &line.x { if v < min_x { min_x = v; } if v > max_x { max_x = v; } }
+            for &v in &line.y { if v < min_y { min_y = v; } if v > max_y { max_y = v; } }
+        }
+
         let range_x = if (max_x - min_x).abs() < 1e-9 { 1.0 } else { max_x - min_x };
         let range_y = if (max_y - min_y).abs() < 1e-9 { 1.0 } else { max_y - min_y };
 
-        painter.rect_filled(rect, 0.0, Color32::from_rgb(20, 20, 30));
-        let axis_pen = egui::Stroke::new(1.0_f32, Color32::GRAY);
-        painter.line_segment([rect.left_bottom(), rect.right_bottom()], axis_pen);
-        painter.line_segment([rect.left_bottom(), rect.left_top()], axis_pen);
-
-        let font = egui::FontId::proportional(9.0);
+        let font_grid = egui::FontId::proportional(10.0);
         let text_color = Color32::LIGHT_GRAY;
+        let font_label = egui::FontId::proportional(13.0);
+        let label_color = Color32::WHITE;
+
+        let y_max_str = format!("{:.1}", max_y);
+        let y_min_str = format!("{:.1}", min_y);
+        let max_tick_str = if y_max_str.len() > y_min_str.len() { &y_max_str } else { &y_min_str };
+        let tick_width = ui.fonts(|f| f.layout_no_wrap(max_tick_str.clone(), font_grid.clone(), text_color).rect.width());
+
+        let mut ylabel_width = 0.0;
+        if !plot.ylabel.is_empty() {
+            let galley = ui.fonts(|f| f.layout_no_wrap(plot.ylabel.clone(), font_label.clone(), label_color));
+            ylabel_width = galley.rect.height() + 10.0;
+        }
+
+        let margin_left = tick_width + ylabel_width + 20.0;
+        let margin_top = 30.0;
+        let margin_bottom = 45.0;
+        let margin_right = 15.0;
+
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(full_rect.left() + margin_left, full_rect.top() + margin_top),
+            egui::pos2(full_rect.right() - margin_right, full_rect.bottom() - margin_bottom)
+        );
+
+        painter.rect_filled(rect, 0.0, Color32::from_rgb(20, 20, 30));
+        
         let grid_pen = egui::Stroke::new(1.0_f32, Color32::from_rgb(50, 50, 50));
+        let axis_pen = egui::Stroke::new(1.0_f32, Color32::GRAY);
 
         for i in 0..=4 {
             let ratio = i as f64 / 4.0;
             let y_val = min_y + ratio * range_y;
             let py = rect.bottom() - (ratio * rect.height() as f64) as f32;
             painter.line_segment([egui::pos2(rect.left(), py), egui::pos2(rect.right(), py)], grid_pen);
-            painter.text(egui::pos2(rect.left() - 3.0, py), egui::Align2::RIGHT_CENTER, format!("{:.1}", y_val), font.clone(), text_color);
+            painter.text(egui::pos2(rect.left() - 5.0, py), egui::Align2::RIGHT_CENTER, format!("{:.1}", y_val), font_grid.clone(), text_color);
             
             let x_val = min_x + ratio * range_x;
             let px = rect.left() + (ratio * rect.width() as f64) as f32;
             painter.line_segment([egui::pos2(px, rect.top()), egui::pos2(px, rect.bottom())], grid_pen);
-            painter.text(egui::pos2(px, rect.bottom() + 3.0), egui::Align2::CENTER_TOP, format!("{:.1}", x_val), font.clone(), text_color);
+            painter.text(egui::pos2(px, rect.bottom() + 5.0), egui::Align2::CENTER_TOP, format!("{:.1}", x_val), font_grid.clone(), text_color);
+        }
+        
+        painter.line_segment([rect.left_bottom(), rect.right_bottom()], axis_pen);
+        painter.line_segment([rect.left_bottom(), rect.left_top()], axis_pen);
+
+        if !plot.title.is_empty() {
+            painter.text(full_rect.center_top() + egui::vec2(0.0, 2.0), egui::Align2::CENTER_TOP, &plot.title, font_label.clone(), label_color);
+        }
+        if !plot.xlabel.is_empty() {
+            painter.text(full_rect.center_bottom() - egui::vec2(0.0, 2.0), egui::Align2::CENTER_BOTTOM, &plot.xlabel, font_label.clone(), label_color);
+        }
+        
+        if !plot.ylabel.is_empty() {
+            let galley = painter.layout_no_wrap(plot.ylabel.clone(), font_label, label_color);
+            let text_height = galley.rect.width(); 
+            
+            let pos = egui::pos2(
+                rect.left() - tick_width - 15.0, 
+                rect.center().y + text_height / 2.0
+            );
+            
+            let shape = egui::epaint::TextShape::new(pos, galley, label_color)
+                .with_angle(-std::f32::consts::FRAC_PI_2);
+            painter.add(shape);
         }
 
-        let mut points = Vec::new();
-        for i in 0..plot.x.len() {
-            let px = rect.left() + ((plot.x[i] - min_x) / range_x * rect.width() as f64) as f32;
-            let py = rect.bottom() - ((plot.y[i] - min_y) / range_y * rect.height() as f64) as f32;
-            points.push(egui::pos2(px, py));
-        }
-        if points.len() > 1 {
-            painter.add(egui::Shape::line(points, egui::Stroke::new(2.0_f32, Color32::GREEN)));
+        for line in &plot.lines {
+            match line.plot_type {
+                PlotType::Line => {
+                    let mut points = Vec::new();
+                    for i in 0..line.x.len() {
+                        let px = rect.left() + ((line.x[i] - min_x) / range_x * rect.width() as f64) as f32;
+                        let py = rect.bottom() - ((line.y[i] - min_y) / range_y * rect.height() as f64) as f32;
+                        points.push(egui::pos2(px, py));
+                    }
+                    if points.len() > 1 {
+                        painter.add(egui::Shape::line(points, egui::Stroke::new(2.0_f32, Color32::GREEN)));
+                    }
+                }
+                PlotType::Stem => {
+                    let y_zero = if min_y <= 0.0 && max_y >= 0.0 {
+                        rect.bottom() - ((0.0 - min_y) / range_y * rect.height() as f64) as f32
+                    } else {
+                        rect.bottom()
+                    };
+                    
+                    for i in 0..line.x.len() {
+                        let px = rect.left() + ((line.x[i] - min_x) / range_x * rect.width() as f64) as f32;
+                        let py = rect.bottom() - ((line.y[i] - min_y) / range_y * rect.height() as f64) as f32;
+                        
+                        painter.line_segment([egui::pos2(px, y_zero), egui::pos2(px, py)], egui::Stroke::new(1.5_f32, Color32::GREEN));
+                        painter.circle_filled(egui::pos2(px, py), 3.0, Color32::GREEN);
+                    }
+                }
+            }
         }
     }
 }
 
 impl eframe::App for NumLiteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let bg_editor = Color32::from_rgb(30, 30, 30); 
-        let bg_tab_inactive = Color32::from_rgb(15, 15, 15); 
-        let bg_bar = Color32::from_rgb(20, 20, 20); 
+        let bg_editor = Color32::from_rgb(30, 30, 30);
+        let bg_tab_inactive = Color32::from_rgb(15, 15, 15);
+        let bg_bar = Color32::from_rgb(20, 20, 20);
         
         let margin_header = egui::Margin { left: 10.0, right: 10.0, top: 10.0, bottom: 10.0 };
         let margin_konten = egui::Margin { left: 10.0, right: 10.0, top: 8.0, bottom: 8.0 };
 
-        // 1. TOP PANEL
+        // 1. PANEL ATAS (Header)
         egui::TopBottomPanel::top("top_panel")
             .frame(egui::Frame::none().fill(bg_bar).inner_margin(margin_header))
             .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                let burger_color = if self.menu_open { Color32::GREEN } else { Color32::LIGHT_GRAY };
-                let burger_btn = egui::Button::new(egui::RichText::new("☰").size(24.0).color(burger_color)).frame(false);
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click());
                 
-                if ui.add_sized([36.0, 36.0], burger_btn).clicked() { 
+                if response.clicked() { 
                     self.menu_open = !self.menu_open; 
                 }
-                
+
+                let bg_color = if response.is_pointer_button_down_on() {
+                    Color32::from_rgb(55, 55, 60)
+                } else if response.hovered() {
+                    Color32::from_rgb(42, 42, 45)
+                } else if self.menu_open {
+                    Color32::from_rgb(30, 42, 34)
+                } else {
+                    Color32::TRANSPARENT
+                };
+
+                ui.painter().rect_filled(rect, Rounding::same(6.0), bg_color);
+
+                let line_color = if self.menu_open {
+                    Color32::from_rgb(76, 209, 55)
+                } else if response.hovered() {
+                    Color32::WHITE
+                } else {
+                    Color32::from_rgb(160, 160, 165)
+                };
+
+                // PERBAIKAN: Tambahkan _f32
+                let stroke = egui::Stroke::new(1.8_f32, line_color);
+                let center = rect.center();
+                let half_w = 8.0;
+
+                for &y_off in &[-5.0, 0.0, 5.0] {
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(center.x - half_w, center.y + y_off),
+                            egui::pos2(center.x + half_w, center.y + y_off),
+                        ],
+                        stroke,
+                    );
+                }
+
+                ui.add_space(4.0);
                 ui.label(egui::RichText::new("NumLite").color(Color32::GREEN).size(28.0).strong());
                 ui.separator();
                 
@@ -253,33 +424,7 @@ impl eframe::App for NumLiteApp {
             });
         });
 
-        // 2. SIDEBAR BURGER MENU
-        if self.menu_open {
-            egui::SidePanel::left("burger_menu")
-                .exact_width(240.0)
-                .resizable(false)
-                .frame(egui::Frame::none().fill(Color32::from_rgb(35, 35, 35)).inner_margin(15.0))
-                .show(ctx, |ui| {
-                    ui.heading(egui::RichText::new("File Menu").size(18.0).color(Color32::LIGHT_GRAY));
-                    ui.add_space(5.0);
-                    ui.separator();
-                    ui.add_space(15.0);
-
-                    let text_style = |text: &str| egui::RichText::new(text).size(16.0);
-                    let btn_rounding = Rounding::same(8.0);
-
-                    if ui.add_sized([210.0, 40.0], egui::Button::new(text_style("➕  New File")).rounding(btn_rounding)).clicked() {
-                        self.new_tab();
-                        self.menu_open = false;
-                    }
-                    ui.add_space(8.0); 
-                    if ui.add_sized([210.0, 40.0], egui::Button::new(text_style("📂  Open File")).rounding(btn_rounding)).clicked() {
-                        self.open_file();
-                    }
-                });
-        }
-
-        // 3. TAB BAR
+        // 2. PANEL TAB
         egui::TopBottomPanel::top("tab_panel")
             .frame(egui::Frame::none().fill(bg_bar).inner_margin(egui::Margin { left: 10.0, right: 10.0, top: 5.0, bottom: 0.0 }))
             .show(ctx, |ui| {
@@ -288,7 +433,6 @@ impl eframe::App for NumLiteApp {
                 for (i, tab) in self.tabs.iter().enumerate() {
                     let is_active = i == self.active_tab;
                     let bg_color = if is_active { bg_editor } else { bg_tab_inactive };
-                    
                     let rounding = if is_active { Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 0.0 } } else { Rounding::default() };
                     
                     let frame = egui::Frame::none()
@@ -317,7 +461,57 @@ impl eframe::App for NumLiteApp {
             });
         });
 
-        // 4. PANEL KANAN (Figure)
+        // 3. PANEL KIRI (BURGER MENU)
+        if self.menu_open {
+            egui::SidePanel::left("burger_menu")
+                .exact_width(240.0)
+                .resizable(false)
+                .frame(egui::Frame::none().fill(Color32::from_rgb(35, 35, 35)).inner_margin(15.0))
+                .show(ctx, |ui| {
+                    ui.heading(egui::RichText::new("File Menu").size(18.0).color(Color32::LIGHT_GRAY));
+                    ui.add_space(5.0);
+                    ui.separator();
+                    ui.add_space(15.0);
+
+                    let text_style = |text: &str| egui::RichText::new(text).size(16.0);
+                    let btn_rounding = Rounding::same(8.0);
+
+                    if ui.add_sized([210.0, 40.0], egui::Button::new(text_style("➕  New File")).rounding(btn_rounding)).clicked() {
+                        self.new_tab();
+                        self.menu_open = false;
+                    }
+                    ui.add_space(8.0); 
+                    if ui.add_sized([210.0, 40.0], egui::Button::new(text_style("📂  Open File")).rounding(btn_rounding)).clicked() {
+                        self.spawn_open_dialog();
+                        self.menu_open = false;
+                    }
+                    ui.add_space(8.0);
+                    
+                    if ui.add_sized([210.0, 40.0], egui::Button::new(text_style("💾  Save")).rounding(btn_rounding)).clicked() {
+                        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                            if let Some(path) = &tab.file_path {
+                                if let Err(e) = fs::write(path, &tab.code) {
+                                    self.output = format!("Gagal menyimpan: {}\n", e);
+                                } else {
+                                    tab.is_saved = true;
+                                    self.output = format!("File berhasil disimpan.\n");
+                                }
+                            } else {
+                                self.spawn_save_dialog();
+                            }
+                        }
+                        self.menu_open = false;
+                    }
+                    ui.add_space(8.0);
+                    
+                    if ui.add_sized([210.0, 40.0], egui::Button::new(text_style("💾  Save As...")).rounding(btn_rounding)).clicked() {
+                        self.spawn_save_dialog();
+                        self.menu_open = false;
+                    }
+                });
+        }
+
+        // 4. PANEL KANAN (PLOT)
         egui::SidePanel::right("plot_panel").resizable(true).default_width(400.0).show(ctx, |ui| {
             ui.heading("Figure");
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -336,41 +530,62 @@ impl eframe::App for NumLiteApp {
             });
         });
 
-        // 5. JENDELA POP-UP
-        if let Some(idx) = self.popup_plot {
-            let mut is_open = true;
-            egui::Window::new("NumLite - Figure Viewer")
-                .open(&mut is_open).resizable(true).default_size([800.0, 500.0]).collapsible(false)
-                .show(ctx, |ui| {
-                    if let Some(plot) = self.plots.get(idx) { self.draw_plot(ui, plot, ui.available_height() - 10.0); }
-                });
-            if !is_open { self.popup_plot = None; }
-        }
+        // 5. PANEL CONSOLE LOG
+        let available_height = ctx.available_rect().height();
+        let min_console_height = 38.0;
+        let max_console_height = (available_height - 120.0).max(min_console_height);
 
-        // 6. PANEL BAWAH (Console Output)
-        egui::TopBottomPanel::bottom("bottom_panel")
+        let console_panel = egui::TopBottomPanel::bottom("console_panel")
             .resizable(true)
-            .default_height(150.0)
-            .frame(egui::Frame::none().fill(Color32::from_rgb(25, 25, 25)).inner_margin(margin_konten))
-            .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Console Output");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add_sized([100.0, 30.0], egui::Button::new("🗑 Clear")).clicked() {
-                        self.output.clear();
-                    }
+            .default_height(200.0)
+            .min_height(min_console_height)
+            .max_height(max_console_height)
+            .frame(egui::Frame::none()
+                .fill(Color32::from_rgb(25, 25, 25))
+                .inner_margin(egui::Margin { left: 10.0, right: 10.0, top: 8.0, bottom: 8.0 })
+                // PERBAIKAN: Tambahkan _f32
+                .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(50, 50, 50)))
+            );
+
+        console_panel.show(ctx, |ui| {
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                // HEADER CONSOLE
+                ui.horizontal(|ui| {
+                    ui.heading("Console Output");
+                    
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Tombol Copy
+                        if ui.add_sized([80.0, 24.0], egui::Button::new("📋 Copy")).clicked() {
+                            ui.output_mut(|o| o.copied_text = self.output.clone());
+                        }
+                        
+                        // Tombol Clear
+                        if ui.add_sized([80.0, 24.0], egui::Button::new("🗑 Clear")).clicked() {
+                            self.output.clear();
+                        }
+                    });
                 });
-            });
-            
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add(egui::TextEdit::multiline(&mut self.output)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(f32::INFINITY)
-                    .interactive(false));
+                
+                ui.separator();
+
+                // AREA SCROLL LOG
+                if ui.available_height() > 10.0 {
+                    egui::ScrollArea::vertical()
+                        .max_height(ui.available_height())
+                        .auto_shrink([false, false])
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            ui.add(egui::Label::new(
+                                egui::RichText::new(&self.output)
+                                    .font(egui::FontId::monospace(13.0))
+                                    .color(egui::Color32::LIGHT_GRAY)
+                            ).selectable(true));
+                        });
+                }
             });
         });
 
-        // 7. PANEL TENGAH (Editor)
+        // 6. PANEL TENGAH (EDITOR)
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(bg_editor).inner_margin(margin_konten))
             .show(ctx, |ui| {
@@ -380,23 +595,44 @@ impl eframe::App for NumLiteApp {
                     if ui.add_sized([90.0, 30.0], egui::Button::new("▶ Run")).clicked() {
                         self.run_code();
                     }
-                    if ui.add_sized([90.0, 30.0], egui::Button::new("💾 Save")).clicked() {
-                        self.save_file();
-                    }
                 });
             });
 
             ui.separator();
 
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let text_edit = egui::TextEdit::multiline(&mut tab.code)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(20);
-                    ui.add(text_edit);
-                });
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut tab.code)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                        );
+                    });
             }
         });
+
+        self.handle_open_result();
+        self.handle_save_result();
+
+        if let Some(idx) = self.popup_plot {
+            if let Some(plot) = self.plots.get(idx) {
+                let mut is_open = true;
+                egui::Window::new(format!("Zoom - {}", if plot.title.is_empty() { "Grafik" } else { &plot.title }))
+                    .open(&mut is_open)
+                    .resizable(true)
+                    .default_size([800.0, 500.0])
+                    .show(ctx, |ui| {
+                        self.draw_plot(ui, plot, 450.0); 
+                    });
+                
+                if !is_open {
+                    self.popup_plot = None;
+                }
+            } else {
+                self.popup_plot = None;
+            }
+        }
     }
 }

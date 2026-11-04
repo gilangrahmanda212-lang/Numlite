@@ -1,13 +1,14 @@
-use crate::token::Token;
+use crate::token::{Token, TokenKind};
 
 pub struct Lexer {
     input: Vec<char>,
     pos: usize,
+    current_line: usize,
 }
 
 impl Lexer {
     pub fn new(input: &str) -> Self {
-        Lexer { input: input.chars().collect(), pos: 0 }
+        Lexer { input: input.chars().collect(), pos: 0, current_line: 1 }
     }
 
     fn peek(&self) -> Option<char> { self.input.get(self.pos).copied() }
@@ -56,11 +57,17 @@ impl Lexer {
 
             let c = match self.peek() {
                 Some(c) => c,
-                None => { tokens.push(Token::Eof); break; }
+                None => { tokens.push(Token { kind: TokenKind::Eof, line: self.current_line }); break; }
             };
 
-            let token = match c {
-                '\n' => { self.advance(); Token::Newline }
+            let token_kind = match c {
+                '\n' => { 
+                    self.advance(); 
+                    let tok = Token { kind: TokenKind::Newline, line: self.current_line };
+                    self.current_line += 1;
+                    tokens.push(tok);
+                    continue;
+                }
                 '%' => {
                     while let Some(ch) = self.peek() {
                         if ch == '\n' { break; }
@@ -70,17 +77,21 @@ impl Lexer {
                 }
                 '0'..='9' => {
                     let n = self.read_number()?;
-                    Token::Number(n)
+                    TokenKind::Number(n)
                 }
                 '.' => {
                     if let Some(next) = self.peek2() {
                         match next {
-                            '*' => { self.advance(); self.advance(); Token::DotStar }
-                            '/' => { self.advance(); self.advance(); Token::DotSlash }
-                            '^' => { self.advance(); self.advance(); Token::DotCaret }
+                            '*' => { self.advance(); self.advance(); TokenKind::DotStar }
+                            '/' => { self.advance(); self.advance(); TokenKind::DotSlash }
+                            '^' => { self.advance(); self.advance(); TokenKind::DotCaret }
                             '0'..='9' => {
                                 let n = self.read_number()?;
-                                Token::Number(n)
+                                TokenKind::Number(n)
+                            }
+                            'a'..='z' | 'A'..='Z' | '_' => {
+                                self.advance(); 
+                                TokenKind::Dot
                             }
                             _ => return Err(format!("Karakter '.' tidak valid")),
                         }
@@ -89,52 +100,74 @@ impl Lexer {
                 'a'..='z' | 'A'..='Z' | '_' => {
                     let ident = self.read_identifier();
                     match ident.as_str() {
-                        "for" => Token::For,
-                        "if" => Token::If,
-                        "else" => Token::Else,
-                        "end" => Token::End,
-                        _ => Token::Identifier(ident),
+                        "for" => TokenKind::For,
+                        "while" => TokenKind::While,
+                        "if" => TokenKind::If,
+                        "else" => TokenKind::Else,
+                        "end" => TokenKind::End,
+                        "switch" => TokenKind::Switch,
+                        "case" => TokenKind::Case,
+                        "otherwise" => TokenKind::Otherwise,
+                        "break" => TokenKind::Break,
+                        "continue" => TokenKind::Continue,
+                        "function" => TokenKind::Function,
+                        _ => TokenKind::Identifier(ident),
                     }
                 }
                 '=' => {
                     self.advance();
-                    if self.peek() == Some('=') { self.advance(); Token::Eq }
-                    else { Token::Assign }
+                    if self.peek() == Some('=') { self.advance(); TokenKind::Eq }
+                    else { TokenKind::Assign }
                 }
                 '!' => {
                     self.advance();
-                    if self.peek() == Some('=') { self.advance(); Token::Neq }
+                    if self.peek() == Some('=') { self.advance(); TokenKind::Neq }
                     else { return Err("Karakter '!' harus diikuti '='".to_string()); }
                 }
                 '<' => {
                     self.advance();
-                    if self.peek() == Some('=') { self.advance(); Token::Le }
-                    else { Token::Lt }
+                    if self.peek() == Some('=') { self.advance(); TokenKind::Le }
+                    else { TokenKind::Lt }
                 }
                 '>' => {
                     self.advance();
-                    if self.peek() == Some('=') { self.advance(); Token::Ge }
-                    else { Token::Gt }
+                    if self.peek() == Some('=') { self.advance(); TokenKind::Ge }
+                    else { TokenKind::Gt }
                 }
-                '+' => { self.advance(); Token::Plus }
-                '-' => { self.advance(); Token::Minus }
-                '*' => { self.advance(); Token::Star }
-                '/' => { self.advance(); Token::Slash }
-                '(' => { self.advance(); Token::LParen }
-                ')' => { self.advance(); Token::RParen }
-                '[' => { self.advance(); Token::LBracket }
-                ']' => { self.advance(); Token::RBracket }
-                ',' => { self.advance(); Token::Comma }
-                ';' => { self.advance(); Token::Semicolon }
-                ':' => { self.advance(); Token::Colon }
-                '\'' => {
+                '&' => {
                     self.advance();
-                    // PERBAIKAN BUG 1: Cek apakah ini String atau Transpose
-                    let is_string = if let Some(next) = self.peek() {
-                        next.is_alphanumeric() || next == ' '
-                    } else { false };
-
-                    if is_string {
+                    if self.peek() == Some('&') { self.advance(); TokenKind::And } 
+                    else { return Err("Gunakan '&&' untuk logika AND".to_string()); }
+                }
+                '|' => {
+                    self.advance();
+                    if self.peek() == Some('|') { self.advance(); TokenKind::Or } 
+                    else { return Err("Gunakan '||' untuk logika OR".to_string()); }
+                }
+                '~' => { self.advance(); TokenKind::Not }
+                '+' => { self.advance(); TokenKind::Plus }
+                '-' => { self.advance(); TokenKind::Minus }
+                '*' => { self.advance(); TokenKind::Star }
+                '/' => { self.advance(); TokenKind::Slash }
+                '(' => { self.advance(); TokenKind::LParen }
+                ')' => { self.advance(); TokenKind::RParen }
+                '[' => { self.advance(); TokenKind::LBracket }
+                ']' => { self.advance(); TokenKind::RBracket }
+                '{' => { self.advance(); TokenKind::LBrace }
+                '}' => { self.advance(); TokenKind::RBrace }
+                ',' => { self.advance(); TokenKind::Comma }
+                ';' => { self.advance(); TokenKind::Semicolon }
+                ':' => { self.advance(); TokenKind::Colon }
+                '\'' => {
+                    let prev_c = if self.pos > 0 { Some(self.input[self.pos - 1]) } else { None };
+                    let is_transpose = match prev_c {
+                        Some(c) => c.is_alphanumeric() || c == ')' || c == ']' || c == '_',
+                        None => false,
+                    };
+                    self.advance();
+                    if is_transpose {
+                        TokenKind::Transpose
+                    } else {
                         let mut s = String::new();
                         while let Some(ch) = self.peek() {
                             if ch == '\'' {
@@ -144,15 +177,14 @@ impl Lexer {
                             s.push(ch);
                             self.advance();
                         }
-                        Token::String(s)
-                    } else {
-                        Token::Transpose
+                        TokenKind::String(s)
                     }
                 }
-                '^' => { self.advance(); Token::Caret }
+                '^' => { self.advance(); TokenKind::Caret }
                 _ => return Err(format!("Karakter tidak dikenal: '{}'", c)),
             };
-            tokens.push(token);
+            
+            tokens.push(Token { kind: token_kind, line: self.current_line });
         }
         Ok(tokens)
     }

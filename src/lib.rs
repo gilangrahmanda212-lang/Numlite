@@ -6,3 +6,6 @@ pub mod parser;
 pub mod token;
 pub mod value;
 pub mod app;
+pub mod file_dialog;
+pub mod builtins;
+pub mod math_utils;
