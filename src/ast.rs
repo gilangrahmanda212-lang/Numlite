@@ -54,6 +54,5 @@ pub enum Stmt {
         y: Expr,
     },
     Hold(bool),
-      StructAssign { object: String, field: String, value: Expr },
-
+    StructAssign { object: String, field: String, value: Expr },
 }
