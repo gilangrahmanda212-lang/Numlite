@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 pub fn open_file_dialog() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]

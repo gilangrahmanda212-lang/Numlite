@@ -2,7 +2,7 @@ use std::env;
 use std::io::{self, Write};
 use crossterm::{event::{self, Event, KeyCode, KeyEvent, KeyModifiers}, terminal, cursor, execute};
 
-use numlite::ast::Stmt;
+use numlite::ast::StmtKind;
 use numlite::eval::{exec_stmt, Env};
 use numlite::lexer::Lexer;
 use numlite::parser::Parser;
@@ -21,7 +21,6 @@ fn main() {
 
 fn run_gui() {
     // Muat ikon dari file PNG yang ada di folder utama proyek
-    // Jika Anda belum punya icon.png, hapus 3 baris ini dan .with_icon(icon) di bawah
     let icon = eframe::icon_data::from_png_bytes(
         &include_bytes!("../icon.png")[..]
     ).expect("Gagal memuat icon.png. Pastikan file icon.png ada di folder utama proyek!");
@@ -87,7 +86,8 @@ fn run_cli() {
         while !parser.is_at_eof() {
             match parser.parse_stmt() {
                 Ok(stmt) => {
-                    if let Stmt::Plot { .. } = stmt {
+                    // PERBAIKAN DI SINI: Gunakan stmt.kind
+                    if let StmtKind::Plot { .. } = stmt.kind {
                         println!("[Grafik diabaikan di Mode CLI]");
                     } else {
                         let mut captured_output = String::new();
@@ -98,8 +98,11 @@ fn run_cli() {
                         }
                     }
                 }
-                Err(e) => { 
-                    if e != "Eof" { println!("Parser error: {}", e); }
+                                Err(e) => { 
+                    if e != "Eof" { 
+                        let current_line = parser.current_line();
+                        println!("Parser Error pada baris {}: {}", current_line, e); 
+                    }
                     break; 
                 }
             }

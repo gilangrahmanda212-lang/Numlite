@@ -1,5 +1,11 @@
+#[derive(Debug, Clone, PartialEq)]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub line: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)] 
-pub enum Expr {
+pub enum ExprKind {
     Number(f64),
     String(String),
     Var(String),
@@ -34,8 +40,14 @@ pub enum PlotType {
     Stem,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub line: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)] 
-pub enum Stmt {
+pub enum StmtKind {
     Assign { name: String, value: Expr },
     Expr(Expr),
     For { var: String, iter: Expr, body: Vec<Stmt> },
@@ -54,6 +66,5 @@ pub enum Stmt {
         y: Expr,
     },
     Hold(bool),
-      StructAssign { object: String, field: String, value: Expr },
-
+    StructAssign { object: String, field: String, value: Expr },
 }
