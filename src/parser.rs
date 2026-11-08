@@ -44,7 +44,6 @@ impl Parser {
         
         let line = self.peek().line;
 
-        // --- DETEKSI STRUCT ASSIGNMENT ---
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {
             if self.tokens.get(self.pos + 1).map(|t| &t.kind) == Some(&TokenKind::Dot) {
                 self.advance(); 
@@ -64,7 +63,6 @@ impl Parser {
             }
         }
 
-        // --- DETEKSI HOLD ---
         if let TokenKind::Identifier(id) = self.peek().kind.clone() {
             if id == "hold" {
                 self.advance();
@@ -79,7 +77,6 @@ impl Parser {
             }
         }
 
-        // --- DETEKSI FUNCTION ---
         if self.peek().kind == TokenKind::Function {
             self.advance();
             let mut name = match self.advance().kind {
@@ -118,7 +115,6 @@ impl Parser {
             return Ok(Stmt { kind: StmtKind::FunctionDef(crate::ast::FunctionDef { name, params, body }), line });
         }
 
-        // --- DETEKSI FOR ---
         if self.peek().kind == TokenKind::For {
             self.advance();
             let var = match self.advance().kind {
@@ -140,7 +136,6 @@ impl Parser {
             return Ok(Stmt { kind: StmtKind::For { var, iter, body }, line });
         }
 
-        // --- DETEKSI WHILE ---
         if self.peek().kind == TokenKind::While {
             self.advance();
             let cond = self.parse_range()?;
@@ -155,7 +150,6 @@ impl Parser {
             return Ok(Stmt { kind: StmtKind::While { cond, body }, line });
         }
 
-        // --- DETEKSI IF ---
         if self.peek().kind == TokenKind::If {
             self.advance();
             let cond = self.parse_range()?;
@@ -184,7 +178,6 @@ impl Parser {
             return Ok(Stmt { kind: StmtKind::If { cond, then_body, else_body }, line });
         }
 
-        // --- DETEKSI SWITCH ---
         if self.peek().kind == TokenKind::Switch {
             self.advance();
             let expr = self.parse_range()?;
@@ -227,7 +220,6 @@ impl Parser {
         if self.peek().kind == TokenKind::Break { self.advance(); return Ok(Stmt { kind: StmtKind::Break, line }); }
         if self.peek().kind == TokenKind::Continue { self.advance(); return Ok(Stmt { kind: StmtKind::Continue, line }); }
 
-        // --- DETEKSI FUNGSI / ASSIGNMENT ---
         if let TokenKind::Identifier(name) = self.peek().kind.clone() {
             let next_tok = self.tokens.get(self.pos + 1);
             if next_tok.map(|t| &t.kind) == Some(&TokenKind::LParen) {
@@ -471,7 +463,8 @@ impl Parser {
             match &self.peek().kind {
                 TokenKind::Comma => { self.advance(); }
                 TokenKind::RBrace => { self.advance(); break; }
-                t => return Err(format!("Diharapkan ',' atau '}}', dapat {:?}", t)),
+                TokenKind::Newline => { self.advance(); }
+                _ => {} // Abaikan spasi
             }
         }
         Ok(Expr { kind: ExprKind::CellLit { elements }, line })
@@ -494,10 +487,10 @@ impl Parser {
                 TokenKind::Semicolon => { self.advance(); rows.push(current_row); current_row = Vec::new(); }
                 TokenKind::RBracket => { self.advance(); rows.push(current_row); break; }
                 TokenKind::Newline => { self.advance(); rows.push(current_row); current_row = Vec::new(); }
-                t => return Err(format!("Diharapkan ',', ';', atau ']', dapat {:?}", t)),
+                _ => {} // Abaikan spasi
             }
         }
-        let is_concat = rows.iter().any(|row| row.iter().any(|e| matches!(e.kind, ExprKind::Var(_) | ExprKind::Call { .. })));
+        let is_concat = rows.iter().any(|row| row.iter().any(|e| matches!(e.kind, ExprKind::Var(_) | ExprKind::Call { .. } | ExprKind::Range { .. })));
         if is_concat {
             let mut row_exprs = Vec::new();
             for row in rows {
@@ -521,4 +514,4 @@ impl Parser {
         }
         Ok(Expr { kind: ExprKind::MatrixLit { rows }, line })
     }
-}
+} // <-- Penutup impl Parser
